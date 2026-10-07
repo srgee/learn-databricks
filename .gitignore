@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+.databricks/
+.vscode/*
+
+# Linters y herramientas de calidad de código
+.ruff_cache/
+.pytest_cache/
+
+# Sistema operativo
+.DS_Store
+.DS_Store?
+Thumbs.db
+
+# Logs y datos locales de prueba
+*.log
+data/
+*.parquet
+*.csv
