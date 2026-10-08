@@ -1,5 +1,9 @@
+from pyspark.sql import SparkSession
+
+
 def main():
-    print("Iniciando pipeline de despliegue y configuración...")
+    print('Iniciando pipeline de despliegue y configuración...')
+    spark = SparkSession.builder.appName('sbit').getOrCreate()
 
     # db_manager = DatabaseManager(
     #    catalog=config.CATALOG_NAME,
@@ -11,5 +15,5 @@ def main():
     # db_manager.run_full_setup()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
