@@ -1,0 +1,15 @@
+def main():
+    print("Iniciando pipeline de despliegue y configuración...")
+
+    # db_manager = DatabaseManager(
+    #    catalog=config.CATALOG_NAME,
+    #    db_name="capstone_db",
+    #    r2_base_path=config.BRONZE_PATH,
+    # )
+
+    # Ejecutamos el setup inicial (equivalente al método setup() del curso)
+    # db_manager.run_full_setup()
+
+
+if __name__ == "__main__":
+    main()
