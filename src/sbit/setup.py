@@ -1,13 +1,12 @@
 import time
 from pathlib import Path
+from typing import Any
 
-from pyspark.sql import SparkSession
-
-from src.sbit.config import config
+from sbit.config import config
 
 
 class SetupHelper:
-    def __init__(self, env: str, spark: SparkSession) -> None:
+    def __init__(self, env: str, spark: Any) -> None:
         self.env = env
         self.spark = spark
         self.landing_zone: Path = Path(config.base_data_path) / 'raw'
@@ -34,7 +33,6 @@ class SetupHelper:
 
     def create_db(self) -> None:
         print(f'Creating the database {self.catalog}.{self.db_name}... ', end='')
-        self.spark.catalog.clearCache()
         self.spark.sql(f'CREATE DATABASE IF NOT EXISTS {self.catalog}.{self.db_name}')
         self.spark.sql(f'USE {self.catalog}.{self.db_name}')
         self.initialized = True
@@ -81,18 +79,18 @@ class SetupHelper:
         self.spark.sql(
             f"""
             CREATE TABLE IF NOT EXISTS {self.catalog}.{self.db_name}.kafka_multiplex_bz(
-                key STRING,,
+                key STRING,
                 value STRING,
-                topic STRING,
                 partition BIGINT,
                 offset BIGINT,
                 timestamp BIGINT,
                 date DATE,
-                week_part STRING,
                 load_time TIMESTAMP,
-                source_file STRING
+                source_file STRING,
+                topic STRING,
+                week_part STRING)
                 PARTITIONED BY (topic, week_part)
-            )"""
+            """
         )
         print('Done!')
 
@@ -142,7 +140,7 @@ class SetupHelper:
                 city STRING,
                 state STRING,
                 zip INT,
-                updated TIMESTAMP,
+                updated TIMESTAMP
             )"""
         )
         print('Done!')
@@ -203,7 +201,7 @@ class SetupHelper:
                 user_id INT,
                 workout_id INT,
                 session_id INT,
-                start_time TIMMESTAMP,
+                start_time TIMESTAMP,
                 end_time TIMESTAMP
             )"""
         )
@@ -219,7 +217,7 @@ class SetupHelper:
                 user_id INT,
                 workout_id INT,
                 session_id INT,
-                start_time TIMMESTAMP,
+                start_time TIMESTAMP,
                 end_time TIMESTAMP,
                 time TIMESTAMP,
                 heart_rate DOUBLE
@@ -286,7 +284,7 @@ class SetupHelper:
                 ON l.mac_address = w.mac_address
                 AND w. start_time BETWEEN l.login AND l.logout
                 order by date, gym, l.mac_address, session_id
-            )"""
+            """
         )
         print('Done!')
 
@@ -295,12 +293,17 @@ class SetupHelper:
         start_time = int(time.time())
 
         self.create_db()
+        self.create_users_bronze_table()
+        self.create_gym_logins_bronze_table()
+        self.create_kafka_multiplex_bronze_table()
         self.create_users_table()
+        self.create_gym_logs_table()
+        self.create_user_profile_table()
         self.create_heart_rate_table()
-        self.create_user_bins_table()
         self.create_workouts_table()
         self.create_completed_workouts_table()
         self.create_workout_bpm_table()
+        self.create_user_bins_table()
         self.create_date_lookup_table()
         self.create_workout_bpm_summary_table()
         self.create_gym_summary_table()
@@ -308,14 +311,14 @@ class SetupHelper:
         print(f'Setup completed in {int(time.time()) - start_time} seconds.')
 
     def assert_table(self, table_name: str) -> bool:
-        if not self.spark.catalog.tableExists(table_name, dbName=f'{self.catalog}.{self.db_name}'):
-            print(f'Found {table_name} in {self.catalog}.{self.db_name}')
+        if self.spark.catalog.tableExists(f'{self.catalog}.{self.db_name}.{table_name}'):
+            print(f'Found {table_name} in {self.catalog}.{self.db_name}. Success!')
             return True
         return False
 
     def validate(self) -> None:
         print('\n Starting setup validation ...')
-        start_time = time.time()
+        start_time = int(time.time())
 
         assert self.spark.catalog.databaseExists(f'{self.catalog}.{self.db_name}')
         count = 0
@@ -324,7 +327,7 @@ class SetupHelper:
                 print(f'ERROR: table {t} does not exist in {self.catalog}.{self.db_name}')
                 count += 1
 
-        print(f'Setup validation completed in {time.time() - start_time} seconds with {count} errors.')
+        print(f'Setup validation completed in {int(time.time()) - start_time} seconds with {count} errors.')
 
     def cleanup(self) -> None:
         if self.spark.catalog.databaseExists(f'{self.catalog}.{self.db_name}'):
