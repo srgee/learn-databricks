@@ -10,10 +10,10 @@ load_dotenv()
 class Config:
     catalogue_name: str = os.getenv('CATALOGUE_NAME', '')
     db_name: str = os.getenv('DB_NAME', '')
-    volume_name: str = os.getenv('VOLUME_NAME', 'data')
+    volume_name: str = os.getenv('VOLUME_NAME', 'data_zone')
     max_files_per_trigger: int = 1000
     base_data_path: str = os.getenv('BASE_DATA_PATH', 'raw')
-    test_data_path: str = os.getenv('TEST_DATA_PATH', 'test')
+    base_checkpoint_path: str = os.getenv('TEST_DATA_PATH', 'chkpnt')
 
 
 # Global Config instance
