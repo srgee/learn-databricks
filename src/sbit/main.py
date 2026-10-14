@@ -1,17 +1,26 @@
+import sys
+
 from databricks.connect import DatabricksSession
 
 from sbit.setup import SetupHelper
 
 
 def main():
-    spark = DatabricksSession.builder.serverless().getOrCreate()
+    try:
+        spark = DatabricksSession.builder.serverless().getOrCreate()
 
-    db_manager = SetupHelper('sbit', spark)
-    db_manager.setup()
-    db_manager.validate()
-    db_manager.cleanup()
+        setup_manager = SetupHelper(spark)
+        setup_manager.setup_db()
+        setup_manager.validate_db()
+        setup_manager.create_volume()
+        setup_manager.validate_volume()
+        setup_manager.cleanup()
 
-    spark.stop()
+    except Exception as e:
+        print(f'Error: {e}')
+        sys.exit(1)
+    finally:
+        spark.stop()
 
 
 if __name__ == '__main__':
