@@ -23,6 +23,5 @@ Thumbs.db
 
 # Logs y datos locales de prueba
 *.log
-data/
 *.parquet
 *.csv
