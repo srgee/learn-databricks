@@ -5,9 +5,6 @@ from typing import Any
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-from sbit.config import config
-from sbit.io import build_object_path
-
 # Schema contract for data upload
 DATE_LOOKUP_TYPES: dict[str, str] = {
     'date': 'date',
@@ -26,37 +23,29 @@ def _transform_date_lookup(df: DataFrame) -> DataFrame:
     return df.select([F.col(col).cast(dtype).alias(col) for col, dtype in DATE_LOOKUP_TYPES.items()])
 
 
-def _load_date_lookup(spark: Any) -> None:
+def _load_date_lookup(spark: Any, path: str) -> None:
     print('Loading data into date_lookup table ... ', end='')
 
-    path = build_object_path(
-        config.catalogue_name,
-        config.db_name,
-        config.volume_name,
-        config.base_data_path,
-        'test_data',
-        'date-lookup.json',
-    )
     print(f'Loading data from {path} ... ', end='')
     (
         _transform_date_lookup(spark.read.option('multiline', 'true').format('json').load(path))
         .write.mode('overwrite')
-        .saveAsTable(f'{config.catalogue_name}.{config.db_name}.date_lookup')
+        .saveAsTable('date_lookup')
     )
 
     print('Done!')
 
 
-def load_history(spark: Any) -> None:
+def load_history(spark: Any, path: str) -> None:
     start_time = int(time.time())
     print('\n\nStarting historical data load ...')
-    _load_date_lookup(spark)
+    _load_date_lookup(spark, path)
     print(f'Historical data load completed in {int(time.time()) - start_time} seconds')
 
 
 def assert_count(spark: Any, table_name: str, expected_count: int) -> None:
     print(f'Validating record counts in {table_name} ... ', end='')
-    actual_count = spark.read.table(f'{config.catalogue_name}.{config.db_name}.{table_name}').count()
+    actual_count = spark.read.table(f'{table_name}').count()
     assert actual_count == expected_count, (
         f'Expected {expected_count:,} records, found {actual_count:,} in {table_name}'
     )

@@ -1,14 +1,12 @@
 import time
 from typing import Any
 
-from sbit.config import config
-
 
 class SetupHelper:
-    def __init__(self, spark: Any) -> None:
+    def __init__(self, spark: Any, catalogue_name: str, db_name: str) -> None:
         self.spark = spark
-        self.catalogue: str = config.catalogue_name
-        self.db_name: str = config.db_name
+        self.catalogue: str = catalogue_name
+        self.db_name: str = db_name
         self.initialized: bool = False
         self.tables: list[str] = [
             'registered_users_bz',
@@ -325,26 +323,23 @@ class SetupHelper:
 
         print(f'Setup validation completed in {int(time.time()) - start_time} seconds with {count} errors.')
 
-    def create_volume(self) -> None:
-        print(f'\n\nCreating volume {config.volume_name} ... ', end='')
-        self.spark.sql(f'CREATE VOLUME IF NOT EXISTS {self.catalogue}.{self.db_name}.{config.volume_name}')
+    def create_volume(self, volume_name: str) -> None:
+        print(f'\n\nCreating volume {volume_name} ... ', end='')
+        self.spark.sql(f'CREATE VOLUME IF NOT EXISTS {self.catalogue}.{self.db_name}.{volume_name}')
         print('Done!')
 
-    def validate_volume(self) -> None:
-        print(f'Validating volume {config.volume_name} ... ', end='')
-        self.spark.sql(f"""DESCRIBE VOLUME {self.catalogue}.{self.db_name}.{config.volume_name}""")
+    def validate_volume(self, volume_name: str) -> None:
+        print(f'Validating volume {volume_name} ... ', end='')
+        self.spark.sql(f"""DESCRIBE VOLUME {self.catalogue}.{self.db_name}.{volume_name}""")
         print('Done!')
 
-    def cleanup(self) -> None:
-        print('\n\nStarting cleanup ...')
-
-        print(f'Dropping volume {config.volume_name} ... ', end='')
-        self.spark.sql(f'DROP VOLUME IF EXISTS {self.catalogue}.{self.db_name}.{config.volume_name}')
-        print('Done!')
-
+    def cleanup_db(self) -> None:
         if self.spark.catalog.databaseExists(f'{self.catalogue}.{self.db_name}'):
             print(f'Dropping the database {self.catalogue}.{self.db_name} ... ', end='')
             self.spark.sql(f'DROP DATABASE IF EXISTS {self.catalogue}.{self.db_name} CASCADE')
             print('Done!')
 
-        print('\nCleanup complete!')
+    def clean_up(self, volume_name: str) -> None:
+        print(f'Dropping volume {volume_name} ... ', end='')
+        self.spark.sql(f'DROP VOLUME IF EXISTS {self.catalogue}.{self.db_name}.{volume_name}')
+        print('Done!')

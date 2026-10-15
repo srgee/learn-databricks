@@ -2,12 +2,17 @@ import sys
 
 from databricks.connect.session import DatabricksSession
 
+from sbit.config import load_settings
 from sbit.history_loader import load_history, validate_history_data
+from sbit.io import build_object_path
 
 
 def main():
     try:
-        spark = DatabricksSession.builder.serverless().getOrCreate()
+        config = load_settings()
+
+        spark = DatabricksSession.builder.getOrCreate()
+        spark.sql(f'USE `{config.catalogue_name}`.`{config.db_name}`')
 
         """setup_manager = SetupHelper(spark)
         setup_manager.setup_db()
@@ -15,25 +20,24 @@ def main():
         setup_manager.validate_volume()
         setup_manager.cleanup()"""
 
-        load_history(spark)
+        # LOAD HISTORY DATA
+        file_path = build_object_path(
+            config.catalogue_name,
+            config.db_name,
+            config.volume_name,
+            config.base_data_path,
+            'test_data',
+            'date-lookup.json',
+        )
+        load_history(spark, file_path)
         validate_history_data(spark)
-
-        """
-        from databricks.sdk import WorkspaceClient
-
-        w = WorkspaceClient(profile='mi-databricks')
-        for f in w.dbutils.fs.ls('/Volumes/dev/sbit_db/landing_zone/data_zone/test_data'):
-            print(f.path)
-
-        spark.read.option('multiline', 'true').format('json').load(
-            '/Volumes/dev/sbit_db/landing_zone/data_zone/test_data/date-lookup.json'
-        ).show(5)"""
 
     except Exception as e:
         print(f'Error: {e}')
         sys.exit(1)
     finally:
-        spark.stop()
+        if 'spark' in locals() and spark is not None:
+            spark.stop()
 
 
 if __name__ == '__main__':

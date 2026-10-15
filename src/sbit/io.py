@@ -17,7 +17,7 @@ def read_bronze(spark, catalog: str, table: str) -> DataFrame
 def write_silver(df, catalog: str, table: str) -> None
 def write_gold(df, catalog: str, table: str) -> None
 
-Añade nuevas funciones cuando se require por tercera vez (no antes)
+Añade nuevas funciones cuando se require (se repite por tercera vez, no antes)
 """
 
 

@@ -1,9 +1,64 @@
 import os
-from dataclasses import dataclass
+from argparse import ArgumentParser
+from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import Any, get_type_hints
 
 
-def _load_env(filepath: str | Path = '.env') -> None:
+@dataclass(frozen=True)
+class Config:
+    """Single source of truth for config settings."""
+
+    catalogue_name: str = field(
+        default='dev',
+        metadata={
+            'flag': '--catalogue',
+            'env_var': 'WEARPIPE_CATALOGUE',
+            'help': 'Databricks catalogue name (Unity Catalogue)',
+        },
+    )
+    db_name: str = field(
+        default='db',
+        metadata={
+            'flag': '--db-name',
+            'env_var': 'WEARPIPE_DB_NAME',
+            'help': 'Databricks database name (schema)',
+        },
+    )
+    volume_name: str = field(
+        default='vol_name',
+        metadata={
+            'flag': '--volume',
+            'env_var': 'WEARPIPE_VOLUME',
+            'help': 'Databricks managed volume name',
+        },
+    )
+    base_data_path: str = field(
+        default='raw',
+        metadata={
+            'flag': '--base-data-path',
+            'env_var': 'WEARPIPE_BASE_DATA_PATH',
+            'help': 'Root data directory in Databricks managed volume',
+        },
+    )
+    base_checkpoint_path: str = field(
+        default='chkpnt',
+        metadata={
+            'flag': '--base-checkpoint-path',
+            'env_var': 'WEARPIPE_BASE_CHECKPOINT_PATH',
+            'help': 'Root checkpoint directory in Databricks managed volume',
+        },
+    )
+    max_files_per_trigger: int = field(
+        default=1000,
+        metadata={
+            'flag': '--max-files-per-trigger',
+            'help': 'Maximum number of files to process per trigger in Spark Structured Streaming to limit input flow to avoid OOM errors',  # noqa: E501
+        },
+    )
+
+
+def _load_env_file(filepath: str | Path = '.env') -> None:
     """Load environment variables from a .env file into os.environ."""
     env_path = Path(filepath)
     if not env_path.is_file():
@@ -23,17 +78,49 @@ def _load_env(filepath: str | Path = '.env') -> None:
         os.environ.setdefault(key, value)
 
 
-@dataclass
-class Config:
-    catalogue_name: str = os.getenv('CATALOGUE_NAME', '')
-    db_name: str = os.getenv('DB_NAME', '')
-    volume_name: str = os.getenv('VOLUME_NAME', 'data_zone')
-    max_files_per_trigger: int = 1000
-    base_data_path: str = os.getenv('BASE_DATA_PATH', 'raw')
-    base_checkpoint_path: str = os.getenv('TEST_DATA_PATH', 'chkpnt')
+def _cast(value: str, type_) -> Any:
+    if type_ is bool:
+        return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return type_(value)  # str, int, float
 
 
-_load_env()
+def build_parser() -> ArgumentParser:
+    parser = ArgumentParser()
+    for f in fields(Config):
+        if f.metadata.get('is_flag'):
+            parser.add_argument(
+                f.metadata['flag'], dest=f.name, action='store_true', default=None, help=f.metadata.get('help')
+            )
+        else:
+            parser.add_argument(f.metadata['flag'], dest=f.name, default=None, help=f.metadata.get('help'))
+    return parser
 
-# Global Config instance
-config = Config()
+
+def load_settings(argv: list[str] | None = None, env_file: str | Path | None = '.env') -> Config:
+    """Settings priority: CLI > env > default values.
+
+    Args:
+        argv: List of command-line arguments. If None, sys.argv[1:] is used.
+        env_file: Path to .env file. If None, .env load is skipped.
+
+    Returns:
+        Config instance
+    """
+    if env_file is not None and Path(env_file).is_file():
+        _load_env_file(Path(env_file))
+
+    ns = build_parser().parse_args(argv)
+    types = get_type_hints(Config)
+    kwargs = {}
+
+    for f in fields(Config):
+        cli_value = getattr(ns, f.name)  # None if it did not come from CLI
+        env_value = os.getenv(f.metadata.get('env_var', 'NO_ENV_VAR'))  # None if it does not exit in the environment
+        print(f'Processing field {f.name}: Found {env_value} for {f.metadata.get("env_var", "NO_ENV_VAR")}')
+        if cli_value is not None:
+            kwargs[f.name] = _cast(cli_value, types[f.name]) if isinstance(cli_value, str) else cli_value
+        elif env_value is not None:
+            kwargs[f.name] = _cast(env_value, types[f.name])
+        else:
+            kwargs[f.name] = f.default
+    return Config(**kwargs)
