@@ -21,12 +21,12 @@ DATE_LOOKUP_TYPES: dict[str, str] = {
 }
 
 
-def transform_date_lookup(df: DataFrame) -> DataFrame:
+def _transform_date_lookup(df: DataFrame) -> DataFrame:
     """Pure function: apply schema contract. Testeable with no I/O."""
     return df.select([F.col(col).cast(dtype).alias(col) for col, dtype in DATE_LOOKUP_TYPES.items()])
 
 
-def load_date_lookup(spark: Any) -> None:
+def _load_date_lookup(spark: Any) -> None:
     print('Loading data into date_lookup table ... ', end='')
 
     path = build_object_path(
@@ -39,7 +39,7 @@ def load_date_lookup(spark: Any) -> None:
     )
     print(f'Loading data from {path} ... ', end='')
     (
-        transform_date_lookup(spark.read.option('multiline', 'true').format('json').load(path))
+        _transform_date_lookup(spark.read.option('multiline', 'true').format('json').load(path))
         .write.mode('overwrite')
         .saveAsTable(f'{config.catalogue_name}.{config.db_name}.date_lookup')
     )
@@ -50,7 +50,7 @@ def load_date_lookup(spark: Any) -> None:
 def load_history(spark: Any) -> None:
     start_time = int(time.time())
     print('\n\nStarting historical data load ...')
-    load_date_lookup(spark)
+    _load_date_lookup(spark)
     print(f'Historical data load completed in {int(time.time()) - start_time} seconds')
 
 
