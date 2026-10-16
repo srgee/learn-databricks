@@ -40,3 +40,16 @@ class SilverPipeline:
         writer = writer.trigger(availableNow=True) if once else writer.trigger(processingTime=processing_time)
 
         return writer.start()
+
+        def run(
+            self,
+            specs: dict[str, SilverStream],
+            phases: list[list[str]],
+            once: bool = True,
+            processing_time: str = '15 seconds',
+        ):
+            for i, phase in enumerate(phases, 1):
+                queries = [self.start(specs[name], once, processing_time) for name in phase]
+                if once:
+                    for q in queries:
+                        q.awaitTermination()

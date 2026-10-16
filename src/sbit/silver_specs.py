@@ -218,3 +218,9 @@ SILVER_STREAMS = {
         ),
     ),
 }
+
+PHASES: list[list[str]] = [
+    ['users', 'gym_logs', 'user_profile', 'workouts', 'heart_rate'],
+    ['user_bins', 'completed_workouts'],
+    ['workout_bpm'],
+]
