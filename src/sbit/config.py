@@ -56,6 +56,15 @@ class Config:
             'help': 'Maximum number of files to process per trigger in Spark Structured Streaming to limit input flow to avoid OOM errors',  # noqa: E501
         },
     )
+    stream_flag: bool = field(
+        default=False,
+        metadata={
+            'flag': '--stream',
+            'is_flag': True,
+            'action': 'store_true',
+            'help': 'Enable Spark Structured Streaming',
+        },
+    )
 
 
 def _load_env_file(filepath: str | Path = '.env') -> None:
