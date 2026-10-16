@@ -17,10 +17,17 @@ class MergeSpec:
     update_set: ColumnMapping | None = None  # None means all cols (set *)
 
 
-def merge_batch(spark: SparkSession, target_table: str, spec: MergeSpec) -> Callable:
+def merge_batch(
+    spark: SparkSession,
+    target_table: str,
+    spec: MergeSpec,
+    batch_transform: Callable[[DataFrame], DataFrame] | None = None,
+) -> Callable:
     """Return the callable for a batch merge (micro-batch)."""
 
     def _upsert(batch_df: DataFrame, batch_id: int) -> None:
+        if batch_transform is not None:
+            batch_df = batch_transform(batch_df)  # dedupe CDC por micro-batch
         builder = (
             DeltaTable.forName(spark, target_table).alias('t').merge(source=batch_df.alias('s'), condition=spec.join_on)
         )

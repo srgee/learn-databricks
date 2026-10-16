@@ -30,9 +30,9 @@ class SilverPipeline:
             df = df.dropDuplicates(list(s.dedupe_keys))
 
         self.spark.sparkContext.setLocalProperty('spark.scheduler.pool', s.scheduler_pool)
-
+        upsert = merge_batch(self.spark, s.name, s.merge, batch_transform=s.batch_transform)
         writer = (
-            df.writeStream.foreachBatch(merge_batch(self.spark, s.name, s.merge))
+            df.writeStream.foreachBatch(upsert)
             .outputMode(s.output_mode)
             .option('checkpointLocation', f'{self.checkpoint_root}/silver_{s.name}')
             .queryName(f'{s.name}_upsert_stream')
