@@ -1,27 +1,9 @@
-from collections.abc import Callable
-from dataclasses import dataclass
-
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
+from sbit.streaming import StreamSpec
 from sbit.transforms import calculate_age_bins, parse_kafka_topic
 from sbit.upserters import MergeSpec, dedup_latest
-
-
-@dataclass(frozen=True)
-class SilverStream:
-    name: str  # Target table (short name)
-    source: str  # Source table (short name)
-    merge: MergeSpec
-    transform: Callable[[DataFrame], DataFrame] | None = None
-    batch_transform: Callable[[DataFrame], DataFrame] | None = None
-    dedupe_keys: tuple[str, ...] = ()
-    watermark_col: str | None = None
-    watermark_delay: str = '30 seconds'
-    ignore_changes: bool = False  # Ignore changes if source is a Silver table
-    output_mode: str = 'update'
-    scheduler_pool: str = 'silver_p3'
-    build_df: Callable[[SparkSession, int], DataFrame] | None = None
 
 
 def _get_cdc_options(starting_version: int, ignore_changes: bool = False) -> dict:
@@ -116,7 +98,7 @@ def build_workout_bpm(spark: SparkSession, starting_version: int) -> DataFrame:
 
 # --- DECLARE TARGETS ---
 SILVER_STREAMS = {
-    'users': SilverStream(
+    'users': StreamSpec(
         name='users',
         source='registered_users_bz',
         transform=lambda df: df.selectExpr(
@@ -127,7 +109,7 @@ SILVER_STREAMS = {
         watermark_col='registration_timestamp',
         scheduler_pool='silver_p2',
     ),
-    'gym_logs': SilverStream(
+    'gym_logs': StreamSpec(
         name='gym_logs',
         source='gym_logins_bz',
         transform=lambda df: df.selectExpr(
@@ -143,7 +125,7 @@ SILVER_STREAMS = {
         watermark_col='login',
         scheduler_pool='silver_p3',
     ),
-    'user_profile': SilverStream(
+    'user_profile': StreamSpec(
         name='user_profile',
         source='kafka_multiplex_bz',
         transform=parse_kafka_topic(
@@ -158,7 +140,7 @@ SILVER_STREAMS = {
         dedupe_keys=('user_id', 'updated'),
         watermark_col='updated',
     ),
-    'workouts': SilverStream(
+    'workouts': StreamSpec(
         name='workouts',
         source='kafka_multiplex_bz',
         transform=lambda df: parse_kafka_topic(
@@ -170,7 +152,7 @@ SILVER_STREAMS = {
         dedupe_keys=('user_id', 'time'),
         watermark_col='time',
     ),
-    'heart_rate': SilverStream(
+    'heart_rate': StreamSpec(
         name='heart_rate',
         source='kafka_multiplex_bz',
         transform=lambda df: (
@@ -187,7 +169,7 @@ SILVER_STREAMS = {
         watermark_col='time',
         scheduler_pool='silver_p2',
     ),
-    'user_bins': SilverStream(  # SCD Type 1; lee silver => ignoreChanges; sin watermark (join estático)
+    'user_bins': StreamSpec(  # SCD Type 1; lee silver => ignoreChanges; sin watermark (join estático)
         name='user_bins',
         source='user_profile',
         ignore_changes=True,
@@ -196,7 +178,7 @@ SILVER_STREAMS = {
         ).select('user_id', calculate_age_bins(F.col('dob')), 'gender', 'city', 'state'),
         merge=MergeSpec(join_on='t.user_id = s.user_id', update=True),
     ),
-    'completed_workouts': SilverStream(
+    'completed_workouts': StreamSpec(
         name='completed_workouts',
         source='workouts',
         build_df=build_completed_workouts,
@@ -206,7 +188,7 @@ SILVER_STREAMS = {
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id AND t.session_id = s.session_id'
         ),
     ),
-    'workout_bpm': SilverStream(
+    'workout_bpm': StreamSpec(
         name='workout_bpm',
         source='completed_workouts',
         build_df=build_workout_bpm,
