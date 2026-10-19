@@ -69,7 +69,7 @@ class Config:
         default='bronze',
         metadata={
             'flag': '--layer',
-            'env': 'WEARPIPE_LAYER',
+            'env_var': 'WEARPIPE_LAYER',
             'choices': ['bronze', 'silver', 'gold', 'all'],
             'help': 'Pipeline layer to run',
         },
@@ -78,7 +78,7 @@ class Config:
         default='15 seconds',
         metadata={
             'flag': '--processing-time',
-            'env': 'WEARPIPE_PROCESSING_TIME',
+            'env_var': 'WEARPIPE_PROCESSING_TIME',
             'help': 'Trigger interval for continuous streaming mode',
         },
     )
@@ -86,7 +86,7 @@ class Config:
         default=0,
         metadata={
             'flag': '--starting-version',
-            'env': 'WEARPIPE_STARTING_VERSION',
+            'env_var': 'WEARPIPE_STARTING_VERSION',
             'help': 'Delta version to start from; only honored when the stream checkpoint is empty',
         },
     )
@@ -181,8 +181,9 @@ def load_settings(argv: list[str] | None = None, env_file: str | Path | None = '
         env_value = os.getenv(f.metadata.get('env_var', 'NO_ENV_VAR'))  # None if it does not exit in the environment
         if cli_value is not None:
             kwargs[f.name] = _cast(cli_value, types[f.name]) if isinstance(cli_value, str) else cli_value
-        elif env_value is not None:
+        elif env_value is not None and env_value != 'NO_ENV_VAR':
             kwargs[f.name] = _cast(env_value, types[f.name])
         else:
             kwargs[f.name] = f.default
+
     return Config(**kwargs)
