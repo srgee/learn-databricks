@@ -27,12 +27,15 @@ def main():
             base_dir = build_object_path(
                 config.catalogue_name, config.db_name, config.volume_name, config.base_data_path, '/raw'
             )
-            BronzeIngester(spark, base_dir, config.base_checkpoint_path).ingest_all(FEEDS, once=once)
+            checkpoint_root = build_object_path(
+                config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/bronze'
+            )
+            BronzeIngester(spark, base_dir, checkpoint_root).ingest_all(FEEDS, once=once)
 
         elif config.layer == 'silver':
             # --- RUN SILVER PIPELINE ---
             checkpoint_root = build_object_path(
-                config.catalogue_name, config.db_name, config.volume_name, config.base_data_path, '/silver'
+                config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/silver'
             )
             UpsertPipeline(spark, checkpoint_root, starting_version=config.starting_version).run(
                 SILVER_STREAMS, PHASES, once=once
@@ -40,7 +43,7 @@ def main():
         elif config.layer == 'gold':
             # --- RUN GOLD PIPELINE ---
             checkpoint_root = build_object_path(
-                config.catalogue_name, config.db_name, config.volume_name, config.base_data_path, '/gold'
+                config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/gold'
             )
             UpsertPipeline(spark, checkpoint_root, starting_version=config.starting_version).run(
                 GOLD_STREAMS, GOLD_PHASES, once=once
@@ -50,11 +53,14 @@ def main():
             base_dir = build_object_path(
                 config.catalogue_name, config.db_name, config.volume_name, config.base_data_path, '/raw'
             )
-            BronzeIngester(spark, base_dir, config.base_checkpoint_path).ingest_all(FEEDS, once=once)
+            checkpoint_root = build_object_path(
+                config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/bronze'
+            )
+            BronzeIngester(spark, base_dir, checkpoint_root).ingest_all(FEEDS, once=once)
             print('Done!')
             print('Starting to run SILVER pipeline ... ', end='')
             checkpoint_root = build_object_path(
-                config.catalogue_name, config.db_name, config.volume_name, config.base_data_path, '/silver'
+                config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/silver'
             )
             UpsertPipeline(spark, checkpoint_root, starting_version=config.starting_version).run(
                 SILVER_STREAMS, PHASES, once=once
@@ -62,7 +68,7 @@ def main():
             print('Done!')
             print('Starting to run GOLD pipeline ... ', end='')
             checkpoint_root = build_object_path(
-                config.catalogue_name, config.db_name, config.volume_name, config.base_data_path, '/gold'
+                config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/gold'
             )
             UpsertPipeline(spark, checkpoint_root, starting_version=config.starting_version).run(
                 GOLD_STREAMS, GOLD_PHASES, once=once
