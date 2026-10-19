@@ -5,7 +5,7 @@ from pyspark.sql import DataFrame
 
 
 def add_audit_columns(df: DataFrame) -> DataFrame:
-    return df.withColumn('created_at', F.current_timestamp()).withColumn('source_file', F.col('_metadata.file_path'))
+    return df.withColumn('load_time', F.current_timestamp()).withColumn('source_file', F.col('_metadata.file_path'))
 
 
 def join_date_lookup(df: DataFrame) -> DataFrame:
