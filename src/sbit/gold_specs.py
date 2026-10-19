@@ -6,7 +6,7 @@ from sbit.upserters import MergeSpec
 
 
 def build_workout_bpm_summary(spark: SparkSession, starting_version: int):
-    """Agregación en streaming con watermark + join con dimensión estática."""
+    """Streaming aggregation with watermark + static dimension join."""
     df_bpm = (
         spark.readStream.option('startingVersion', starting_version)
         .table('workout_bpm')

@@ -82,6 +82,14 @@ class Config:
             'help': 'Trigger interval for continuous streaming mode',
         },
     )
+    starting_version: int = field(
+        default=0,
+        metadata={
+            'flag': '--starting-version',
+            'env': 'WEARPIPE_STARTING_VERSION',
+            'help': 'Delta version to start from; only honored when the stream checkpoint is empty',
+        },
+    )
 
     def __post_init__(self) -> None:
         """Validate arguments' choices."""
