@@ -107,7 +107,6 @@ SILVER_STREAMS = {
         merge=MergeSpec(join_on='t.user_id = s.user_id'),  # insert-only: no puede re-registrarse
         dedupe_keys=('user_id', 'device_id'),
         watermark_col='registration_timestamp',
-        scheduler_pool='silver_p2',
     ),
     'gym_logs': StreamSpec(
         name='gym_logs',
@@ -123,7 +122,6 @@ SILVER_STREAMS = {
         ),
         dedupe_keys=('mac_address', 'gym', 'login'),
         watermark_col='login',
-        scheduler_pool='silver_p3',
     ),
     'user_profile': StreamSpec(
         name='user_profile',
@@ -167,9 +165,8 @@ SILVER_STREAMS = {
         merge=MergeSpec(join_on='t.device_id = s.device_id AND t.time = s.time'),
         dedupe_keys=('device_id', 'time'),
         watermark_col='time',
-        scheduler_pool='silver_p2',
     ),
-    'user_bins': StreamSpec(  # SCD Type 1; lee silver => ignoreChanges; sin watermark (join estático)
+    'user_bins': StreamSpec(  # SCD Type 1; read silver => ignoreChanges; no watermark (static join)
         name='user_bins',
         source='user_profile',
         ignore_changes=True,
@@ -183,7 +180,6 @@ SILVER_STREAMS = {
         source='workouts',
         build_df=build_completed_workouts,
         output_mode='append',
-        scheduler_pool='silver_p1',
         merge=MergeSpec(
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id AND t.session_id = s.session_id'
         ),
@@ -193,7 +189,6 @@ SILVER_STREAMS = {
         source='completed_workouts',
         build_df=build_workout_bpm,
         output_mode='append',
-        scheduler_pool='silver_p2',
         merge=MergeSpec(
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id '
             'AND t.session_id = s.session_id AND t.time = s.time'

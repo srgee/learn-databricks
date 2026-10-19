@@ -19,7 +19,6 @@ class StreamSpec:
     watermark_delay: str = '30 seconds'
     ignore_changes: bool = False  # Ignore changes if source is a Silver table
     output_mode: str = 'update'
-    scheduler_pool: str = 'silver_p3'
     build_df: Callable[[SparkSession, int], DataFrame] | None = None
 
 
@@ -47,7 +46,6 @@ class UpsertPipeline:
         if s.dedupe_keys:
             df = df.dropDuplicates(list(s.dedupe_keys))
 
-        self.spark.sparkContext.setLocalProperty('spark.scheduler.pool', s.scheduler_pool)
         upsert = merge_batch(self.spark, s.name, s.merge, batch_transform=s.batch_transform)
         writer = (
             df.writeStream.foreachBatch(upsert)

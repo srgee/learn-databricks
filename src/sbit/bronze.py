@@ -22,8 +22,6 @@ class BronzeIngester:
         if feed.transform is not None:
             df_stream = feed.transform(df_stream)
 
-        self.spark.sparkContext.setLocalProperty('spark.scheduler.pool', feed.scheduler_pool)
-
         writer = (
             df_stream.writeStream.format('delta')
             .option('checkpointLocation', f'{self.checkpoint_path}/{feed.name}')

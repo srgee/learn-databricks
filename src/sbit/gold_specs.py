@@ -46,7 +46,6 @@ GOLD_STREAMS: dict[str, StreamSpec] = {
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id AND t.session_id = s.session_id'
         ),
         output_mode='append',
-        scheduler_pool='gold_p1',
     ),
 }
 
