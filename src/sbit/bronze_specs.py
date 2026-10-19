@@ -35,6 +35,6 @@ FEEDS = [
         file_format='json',
         schema='key string, value string, topic string, partition bigint, offset bigint, timestamp bigint',
         options={'maxFilesPerTrigger': '1'},
-        transform=lambda df: add_audit_columns(join_date_lookup(df)),
+        transform=lambda df: join_date_lookup(add_audit_columns(df)),
     ),
 ]

@@ -1,6 +1,10 @@
 
 WEARABLE DATA PROCESSOR OVER DATALAKEHOUSE: wearpipe
 
+Proyecto de aprendiza Databricks. Se basa en capstoone project del curso de Udemy Streaming Processin con Databricks.
+
+Este proyecto aplica las mejores practicas de ingenieria del softwar para el procesamiento de datos en streaming con Databricks..
+
 Best practices recommend use separate databases for bronze, silver and gold. For simplicity, this project uses a single databse for all medallion layers.
 
 To avoid JVM dependency locally, we use Databricks Connect to use cloud resources to run the code from the dev environment. This requires to swap
@@ -33,44 +37,11 @@ Dual session:
 - prod runns on Databricks Runtime (DBR)
 
 All business logic implemented as pure functions over DataFrames (see example below)
-```python
-# src/etl_ventas/transforms.py
-from pyspark.sql import DataFrame
-
-
-def dedupe(df: DataFrame, keys: list[str]) -> DataFrame:
-    return df.dropDuplicates(keys)
-
-
-def normalize_amounts(df: DataFrame, col: str) -> DataFrame:
-    from pyspark.sql import functions as F
-
-    return df.withColumn(col, F.round(F.col(col).cast('decimal(18,2)'), 2))
-```
 
 Sample entry point invoked by job in prod. The code does not know anything about the runtime (dev or prod).
-The environment is read from the command line (argument):
-```python
-# src/etl_ventas/jobs.py
-import argparse
-
-from etl_ventas.runtime import get_spark
-from etl_ventas import transform
+The environment is read from the command line (argument)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--catalog', required=True)  # cambia por entorno
-    parser.add_argument('--table', required=True)
-    args = parser.parse_args()
-
-    spark = get_spark()  # ← en prod: sesión nativa; en local: remota
-
-    source = spark.read.table(f'{args.catalog}.bronze.{args.table}')
-    clean = normalize(transform.dedupe(source, keys=['id']))
-
-    clean.write.mode('overwrite').option('overwriteSchema', 'true').saveAsTable(f'{args.catalog}.silver.{args.table}')
-```
 ESTRUCTURA PROYECTO:
 
 learn-databricks/
@@ -102,7 +73,7 @@ learn-databricks/
 Las SPECS son un registro declarativo de fuentes (el "qué"). Indican qué tablas existen, de donde vienen, qué esquema y qué opciones. Son básicamente datos, no tienen lógica. Existe una spec por capa.
 
 Usamos dos motores por que los patrones son distintos:
-- Bronze lee archivos, escribe directamente sin MERGE (append)
+- Bronze: lee archivos, escribe directamente sin MERGE (append)
 - Silver/Gold: lee tablas Delta con opciones CDC, escriben via foreachBatch + DeltaTable.merge
 
 Las transformaciones son funciones puras que no leen estado global, no deciden rutas, ni tocan la sesion. Por eso son testables sin necesityar infraestructura y son 100% reutilizables entre las capas.
@@ -433,4 +404,151 @@ Activa la escritura optimizada en tablas Delta. Agrupa y reorganiza las particio
 Habilita la compactación automática en Delta Lake. Tras una escritura, comprueba si hay archivos pequeños y los fusiona en archivos más grandes de manera automática, reduciendo la necesidad de ejecutar comandos `OPTIMIZE` manuales.
 * **`spark.sql.streaming.stateStore.providerClass`**
 Configura **RocksDB** como el proveedor del almacén de estado para *Spark Structured Streaming*. Es ideal para flujos con mucho estado (como *joins* o agregaciones en streaming), ya que gestiona los datos fuera de la memoria JVM principal, evitando errores de falta de memoria (*OOM*).
+
+
+
+------------------------------------------------------------------------------------------------------------------
+TODO (19/10)
+- Yaml de produccion (ver abajo ejemplo)
+- Añadir tests (ver ejemplo abajo)
+- Renombrar paquete (sbit --> wearpipe)
+- MOver build_path function para eliminar io.py module (solo 1 funcion)
+
+```yaml
+tasks:
+  - task_key: deploy_ddl
+    python_wheel_task: {package_name: gym-pipeline, entry_point: deploy,
+                        parameters: ["--env", "${bundle.target}"]}
+  - task_key: bronze
+    depends_on: [{task_key: deploy_ddl}]
+    python_wheel_task: {package_name: gym-pipeline, entry_point: gym-pipeline,
+                        parameters: ["--layer", "bronze", "--env", "${bundle.target}"]}
+  - task_key: silver
+    depends_on: [{task_key: bronze}]
+    python_wheel_task: {package_name: gym-pipeline, entry_point: gym-pipeline,
+                        parameters: ["--layer", "silver", "--env", "${bundle.target}"]}
+  - task_key: gold
+    depends_on: [{task_key: silver}]
+    python_wheel_task: {package_name: gym-pipeline, entry_point: gym-pipeline,
+                        parameters: ["--layer", "gold", "--env", "${bundle.target}"]}
+```
+
+```python
+def test_layer_choices_rejected_at_parser_level(capsys):
+    with pytest.raises(SystemExit):  # argparse aborta con error 2
+        load(['--layer', 'staging'])
+    assert 'invalid choice' in capsys.readouterr().err
+
+
+def test_layer_choices_accepted():
+    assert load(['--layer', 'silver']).layer == 'silver'
+```
+
+--------------------------------------------------------------------------------------------------------------
+
+## Qué es startingVersion
+En el contexto de Databrikcs, startingVersion es el punto de arranque del stream cuando el checkpoint está vacio.
+
+Una tabla Delta lleva un log de commits versionado (v0 = creación, v1, v2... cada append/update es una versión). Cuando haces readStream.table(), Spark debe decidir en qué punto del log arranca.
+
+En el proyecto, starting_point controla desde qué versión del log e la tabla Delta empieza a leer el stream la primera vez que arranca (checkpoint vacio).
+
+Casos de uso más comunes:
+
+- Backfill. Si corriges un bug en una transformación silver y quieres regenerar las tablas: borras los checkpoints (y truncas los targets si quieres), relanzas con starting_version=0, y el stream relee todo el bronze. Los MERGE son idempotentes por clave, así que el reproceso converge al estado correcto sin duplicados — es la razón por la que los upserters del original están diseñados con MERGE y no con append ciego.
+
+- Reproceso parcial tras un bug. En lugar de releer todo, consultas el punto del error (`DESCRIBE HISTORY dev.sbit_db.registered_users_bz`)
+localizando la versión previa al commit problemático, borras el checkpoint del stream afectado y relanzas con --starting-version N: solo se reprocesa desde ahí.
+
+- Recuperación operativa. Si un checkpoint se corrompe o se pierde, starting_version define de dónde re-sembrar el stream en vez de depender de las semánticas por defecto del snapshot.
+
+- Cold-start explícito. Sin la opción, el comportamiento de primera arranque (snapshot completo) es implícito y poco conocido. Fijar 0 lo hace determinista y documentado.
+
+**IMPORTANTE:** Sólo aplica con checkpoint vacío. Una vez que el stream tiene checkpoint, Spark ignora completamente staritngVersion. El stream siempre arranca desde su checkpoint, con independencia del valor starting_point que le pases al motor.
+
+## Change Data Capture (CDC)
+Nuestra capa Silver, en lugar de procesar sólo snapshot completos, se basa en la tabla Delta, que soporta CDC en streaming, para procesar todos los cambios (inserciones, actualizaciones y borrados) en origen (capa Bronze). Los streamings de Silver son CDC, y los streamings de Gold son CDC+MERGE.
+
+A continuación se explican las opciones existentes del reader:
+
+- startingVersion: qué versión del log leer cuando el checkpoint está vacío (backfill completo con 0, ventana con N).
+
+- ignoreDeletes: tolera que se borren ficheros de la tabla fuente (p. ej. DELETE por partición) sin que el stream falle. Sin ella, cualquier delete en el origen mata el stream con una excepción, porque Structured Streaming asume fuentes append-only.
+
+- ignoreChanges: tolera que la fuente sufra UPDATE/MERGE/OVERWRITE que reescriben ficheros. Matiz importante: no propaga el cambio correctamente — el stream re-emite las filas afectadas como si fueran nuevas. Por eso solo es seguro cuando el sink sabe deduplicar/actualizar: es exactamente el caso de user_bins (lee user_profile, que es SCD Type 1 y recibe MERGE ... UPDATE), donde el sink re-machea por user_id y actualiza.
+
+- withEventTimeOrder: fuerza el procesamiento en orden de event-time cuando hay dedupe/watermark y la fuente recibe updates desordenados. Tu proyecto la dejó desactivada.
+
+- skipChangeCommits (DBR moderno, alternativa): salta directamente los commits que contienen cambios/borrados, sin re-emitir nada. Semántica distinta de ignoreChanges (tolerar vs. descartar); útil si el sink no quiere ver filas re-escritas.
+
+El proyecto también aplica CDC para ingerir los eventos de Kafka en la capa Bronze. En este caso, se procesan todos los eventos, sin importar si son nuevos o actualizados, basado en èvent_type` (new / insert / update).
+
+## Data engines
+
+The pipeline is built on a simple architecture: declarative specs (describe what moves through the pipeline), and two generic engines (define how data is moved).Adding a new table means adding a spec entry. No code changes are required in the engines:
+
+- Bronze pipeline: BronzeIngester class (engine) / Input (raw data files) / Output (Delta tables)
+- Gold and Silver pipelines: UpserterPipeline class (engine) / Input (Delta tables) / Output (Delta tables)
+
+### BronzeIngester
+
+The bronze engine lands raw files from the landing zone into Delta tables using Auto Loader (cloudFiles), which incrementally discovers newfiles and guarantees exactly-once ingestion via checkpointing.
+
+Each source is declared as a SourceFeed spec in bronze_specs.py:
+
+- target name, file format and explicit schema
+- reader options (e.g. header, maxFilesPerTrigger to throttleprocessing on limited compute)
+- a pure transform (e.g. adding audit columns) applied to the stream
+- a scheduler pool tag
+
+The engine builds one streaming query per feed:
+
+landing_zone/<name>  →  readStream(cloudFiles)  →  transform  →  writeStream  →  toTable (<name>, append)
+
+Key properties:
+
+- Append-only: bronze never updates or deletes; the target table is the immutable landing of raw data.
+- Schema-first: the schema is declared in the spec, not inferred,so ingestion never fails on a drifted file.
+- Idempotent replay: checkpoint state makes availableNow runsrepeatable — re-running drains only new files.
+
+
+### UpserterPipeline
+
+The silver and gold layers share a single engine that reads Delta tables as change streams and applies each micro-batch with a MERGE (via `DeltaTable.merge` inside 'foreachBatch`), making targets idempotent by business key.
+
+Each target is declared as a StreamSpec in silver_specs.py / gold_specs.py. For the standard single-source path the engine handles:
+
+- CDC reader options: `startingVersion` and `ignoreDeletes` / `ignoreChanges` (tolerating deletes on bronze or SCD1 updates on silver sources without killing the stream)
+- Event-time processing: watermark before `dropDuplicates`, so deduplication state is cleaned up automatically
+- Per-batch logic: `batch_transform` runs inside `foreachBatchfor` operations not allowed on streaming DataFrames (e.g. CDCrank() windowing to keep the latest event per key)
+- The MERGE itself is declarative (MergeSpec): a join condition plusoptional guarded UPDATE and INSERT clauses. The upsert logic in oneplace, applied identically to every target.
+
+Targets that escape the single-source pattern (stream-stream joins such as `completed_workouts`, multi-source joins with static dimensions such as `workout_bpm`, streaming aggregations such as `workout_bpm_summary`) use a custom builder function (`build_df`) that constructs the streaming DataFrame and hands it back to the engine.
+
+Dependent targets are executed in explicit phases (PHASES / GOLD_PHASES) with the `run` method. All streams  in a phase run concurrently and complete before the next pahse starts, so a target never consumes a table that has not been fully ingested yet.
+
+### MERGE safety
+
+All silver and gold writes go through DeltaTable.MERGE applied to the current micro-batch. Safety does not come from a single mechanism but from independent layers, each covering a distinct failure mode.
+
+- Idempotency by business key. Every MERGE matches on the target's natural key (user_id, device_id + time, etc). Replayed batches, backfills re-run with `--sarting-version` and cleared checkpoint, and rows re-emitted by source rewrites all converge to the same state: the MERGE updates the matched row or skips it (never duplicates it). This makes processing cheap and safe.
+- Update policy per target. Update semantics are a modeling decision, declared in each spec's MergeSpec (insert-only, last-writer-wins, slowly-changing-dimension overwrite, monotonic advance)
+- Deduplication. Stream level (`dropDuplicates`) applied after the event-time watermark bounds the dedup state and cleans it up automatically (checkpoint-owned).
+Batch level (rank per key, keep latest) runs inside `foreachBatch`, where window functions are allowed on micro-batches. Events arriving later than the watermark are dropped by design. The accepted trade-off for bounded streaming state.
+- Bounded merge scope. The MERGE source is always the current micro-batch, never a full table. Merge cost scales with batch size, not with target size.
+
+## Pipeline preconditions
+
+- Targets pre-exist: DDL is deployed before any stream starts(deploy_ddl task); DeltaTable.forName fails fast otherwise.
+- Phase ordering: a dependent target starts only after its inputs arefully drained (PHASES, awaited per phase).
+- Append-only bronze: silver MERGEs assume bronze never updates.ignoreDeletes / ignoreChanges tolerate source rewrites, and anyrows re-emitted by them are reconciled by the idempotent MERGE.
+
+
+## Running
+
+Both engines support two trigger modes, selected by --stream:
+
+- Default (availableNow): drains all pending data and exits —batch-style, cost-efficient, idempotent. Use for backfills andscheduled jobs.
+- --stream (continuous): triggers every --processing-timeinterval and runs indefinitely. Use for low-latency serving.
+
 
