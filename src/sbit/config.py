@@ -65,6 +65,30 @@ class Config:
             'help': 'Enable Spark Structured Streaming',
         },
     )
+    layer: str = field(
+        default='bronze',
+        metadata={
+            'flag': '--layer',
+            'env': 'WEARPIPE_LAYER',
+            'choices': ['bronze', 'silver', 'gold'],
+            'help': 'Pipeline layer to run',
+        },
+    )
+    processing_time: str = field(
+        default='15 seconds',
+        metadata={
+            'flag': '--processing-time',
+            'env': 'WEARPIPE_PROCESSING_TIME',
+            'help': 'Trigger interval for continuous streaming mode',
+        },
+    )
+
+    def __post_init__(self) -> None:
+        """Validate arguments' choices."""
+        for f in fields(self):
+            allowed = f.metadata.get('choices')
+            if allowed is not None and getattr(self, f.name) not in allowed:
+                raise ValueError(f'{f.name}={getattr(self, f.name)!r}; valores válidos: {allowed}')
 
 
 def _load_env_file(filepath: str | Path = '.env') -> None:
@@ -87,13 +111,29 @@ def _load_env_file(filepath: str | Path = '.env') -> None:
         os.environ.setdefault(key, value)
 
 
-def _cast(value: str, type_) -> Any:
+def _cast(value: str, type_: type[Any]) -> Any:
+    """Convert a string value to the specified data type.
+
+    Args:
+        value: The string value to convert.
+        type_: The target data type (e.g., int, float, bool, str).
+
+    Returns:
+        The converted value.
+    """
     if type_ is bool:
         return value.strip().lower() in {'1', 'true', 'yes', 'on'}
     return type_(value)  # str, int, float
 
 
 def build_parser() -> ArgumentParser:
+    """Generate the CLI parser from Config attributes.
+
+    Every attribute contributes exactly one option. Field metadata drives
+    the shape: 'is_flag' -> store_true, 'choices' -> argparse-level
+    validation, 'help' -> help text. Fields without a metadata key get
+    None, which argparse treats as "not applicable".
+    """
     parser = ArgumentParser()
     for f in fields(Config):
         if f.metadata.get('is_flag'):
@@ -101,7 +141,13 @@ def build_parser() -> ArgumentParser:
                 f.metadata['flag'], dest=f.name, action='store_true', default=None, help=f.metadata.get('help')
             )
         else:
-            parser.add_argument(f.metadata['flag'], dest=f.name, default=None, help=f.metadata.get('help'))
+            parser.add_argument(
+                f.metadata['flag'],
+                dest=f.name,
+                default=None,
+                choices=f.metadata.get('choices'),
+                help=f.metadata.get('help'),
+            )
     return parser
 
 
