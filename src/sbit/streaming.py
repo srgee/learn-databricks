@@ -59,15 +59,15 @@ class UpsertPipeline:
 
         return writer.start()
 
-        def run(
-            self,
-            specs: dict[str, StreamSpec],
-            phases: list[list[str]],
-            once: bool = True,
-            processing_time: str = '15 seconds',
-        ):
-            for i, phase in enumerate(phases, 1):
-                queries = [self.start(specs[name], once, processing_time) for name in phase]
-                if once:
-                    for q in queries:
-                        q.awaitTermination()
+    def run(
+        self,
+        specs: dict[str, StreamSpec],
+        phases: list[list[str]],
+        once: bool = True,
+        processing_time: str = '15 seconds',
+    ):
+        for i, phase in enumerate(phases, 1):
+            queries = [self.start(specs[name], once, processing_time) for name in phase]
+            if once:
+                for q in queries:
+                    q.awaitTermination()
