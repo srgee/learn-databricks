@@ -1,12 +1,20 @@
+import sys
 import time
 from typing import Any
 
+from databricks.connect.session import DatabricksSession
+
+from sbit.config import load_settings
+from sbit.history_loader import load_history, validate_history_data
+from sbit.io import build_object_path
+
 
 class SetupHelper:
-    def __init__(self, spark: Any, catalogue_name: str, db_name: str) -> None:
+    def __init__(self, spark: Any, catalogue_name: str, db_name: str, volume_name: str) -> None:
         self.spark = spark
         self.catalogue: str = catalogue_name
         self.db_name: str = db_name
+        self.volume_name: str = volume_name
         self.initialized: bool = False
         self.tables: list[str] = [
             'registered_users_bz',
@@ -323,14 +331,14 @@ class SetupHelper:
 
         print(f'Setup validation completed in {int(time.time()) - start_time} seconds with {count} errors.')
 
-    def create_volume(self, volume_name: str) -> None:
-        print(f'\n\nCreating volume {volume_name} ... ', end='')
-        self.spark.sql(f'CREATE VOLUME IF NOT EXISTS {self.catalogue}.{self.db_name}.{volume_name}')
+    def create_volume(self) -> None:
+        print(f'\n\nCreating volume {self.volume_name} ... ', end='')
+        self.spark.sql(f'CREATE VOLUME IF NOT EXISTS {self.catalogue}.{self.db_name}.{self.volume_name}')
         print('Done!')
 
-    def validate_volume(self, volume_name: str) -> None:
-        print(f'Validating volume {volume_name} ... ', end='')
-        self.spark.sql(f"""DESCRIBE VOLUME {self.catalogue}.{self.db_name}.{volume_name}""")
+    def validate_volume(self) -> None:
+        print(f'Validating volume {self.volume_name} ... ', end='')
+        self.spark.sql(f"""DESCRIBE VOLUME {self.catalogue}.{self.db_name}.{self.volume_name}""")
         print('Done!')
 
     def cleanup_db(self) -> None:
@@ -339,7 +347,35 @@ class SetupHelper:
             self.spark.sql(f'DROP DATABASE IF EXISTS {self.catalogue}.{self.db_name} CASCADE')
             print('Done!')
 
-    def clean_up(self, volume_name: str) -> None:
-        print(f'Dropping volume {volume_name} ... ', end='')
-        self.spark.sql(f'DROP VOLUME IF EXISTS {self.catalogue}.{self.db_name}.{volume_name}')
+    def clean_up(self) -> None:
+        print(f'Dropping volume {self.volume_name} ... ', end='')
+        self.spark.sql(f'DROP VOLUME IF EXISTS {self.catalogue}.{self.db_name}.{self.volume_name}')
         print('Done!')
+
+
+def main() -> None:
+    try:
+        config = load_settings()
+
+        spark = DatabricksSession.builder.getOrCreate()
+
+        # SETUP DATABASE
+        setup_manager = SetupHelper(spark, config.catalogue_name, config.db_name, config.volume_name)
+        setup_manager.setup_db()
+        setup_manager.validate_db()
+        setup_manager.validate_volume()
+
+        # LOAD HISTORY DATA
+        file_path = build_object_path(
+            config.catalogue_name,
+            config.db_name,
+            config.volume_name,
+            config.base_data_path,
+            'test_data',
+            'date-lookup.json',
+        )
+        load_history(spark, file_path)
+        validate_history_data(spark)
+    except Exception as e:
+        print(f'Initial setup failed with the following error: {e}')
+        sys.exit(1)
