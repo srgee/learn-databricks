@@ -70,7 +70,7 @@ class Config:
         metadata={
             'flag': '--layer',
             'env': 'WEARPIPE_LAYER',
-            'choices': ['bronze', 'silver', 'gold'],
+            'choices': ['bronze', 'silver', 'gold', 'all'],
             'help': 'Pipeline layer to run',
         },
     )
