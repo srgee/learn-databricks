@@ -179,7 +179,6 @@ def load_settings(argv: list[str] | None = None, env_file: str | Path | None = '
     for f in fields(Config):
         cli_value = getattr(ns, f.name)  # None if it did not come from CLI
         env_value = os.getenv(f.metadata.get('env_var', 'NO_ENV_VAR'))  # None if it does not exit in the environment
-        print(f'Processing field {f.name}: Found {env_value} for {f.metadata.get("env_var", "NO_ENV_VAR")}')
         if cli_value is not None:
             kwargs[f.name] = _cast(cli_value, types[f.name]) if isinstance(cli_value, str) else cli_value
         elif env_value is not None:
