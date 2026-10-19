@@ -14,7 +14,7 @@ class BronzeIngester:
         df_stream = (
             self.spark.readStream.format('cloudFiles')
             .schema(feed.schema)
-            .option('cloudFile.format', feed.file_format)
+            .option('cloudFiles.format', feed.file_format)
             .options(**feed.options)
             .load(f'{self.base_dir}/{feed.name}')
         )
