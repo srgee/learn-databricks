@@ -20,7 +20,7 @@ def main():
         spark.sql(f'USE `{config.catalogue_name}`.`{config.db_name}`')
 
         start_time = int(time.time())
-        print(f'\nStarting {config.layer}.upper() pipeline(s) ...')
+        print(f'\nStarting {config.layer.upper()} pipeline(s) ...')
         once = not config.stream_flag
         if config.layer == 'bronze':
             # --- INGEST RAW DATA (BRONZE PIPELINE) ---
@@ -69,7 +69,7 @@ def main():
             )
             print('Done!')
 
-        print(f'{config.layer}.upper() pipeline(s) completed in {int(time.time()) - start_time} seconds')
+        print(f'{config.layer.upper()} pipeline(s) completed in {int(time.time()) - start_time} seconds')
 
     except Exception as e:
         print(f'Error: {e}')
