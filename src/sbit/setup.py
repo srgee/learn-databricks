@@ -363,6 +363,7 @@ def main() -> None:
         setup_manager = SetupHelper(spark, config.catalogue_name, config.db_name, config.volume_name)
         setup_manager.setup_db()
         setup_manager.validate_db()
+        setup_manager.create_volume()
         setup_manager.validate_volume()
 
         # LOAD HISTORY DATA
