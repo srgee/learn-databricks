@@ -21,13 +21,12 @@ def config() -> Config:
 
 
 @pytest.fixture(scope='session')
-def setup_date_lookup_file(spark: SparkSession, cfg: Config) -> str:
-    """Ensure Unity Catalog schema and volume exist, then upload date-lookup.json."""
-    spark.sql(f'CREATE CATALOG IF NOT EXISTS `{cfg.catalogue_name}`')
-    spark.sql(f'CREATE DATABASE IF NOT EXISTS `{cfg.catalogue_name}`.`{cfg.db_name}`')
-    spark.sql(f'CREATE VOLUME IF NOT EXISTS `{cfg.catalogue_name}`.`{cfg.db_name}`.`{cfg.volume_name}`')
+def date_lookup_file(spark: SparkSession, config: Config) -> str:
+    spark.sql(f'CREATE CATALOG IF NOT EXISTS `{config.catalogue_name}`')
+    spark.sql(f'CREATE DATABASE IF NOT EXISTS `{config.catalogue_name}`.`{config.db_name}`')
+    spark.sql(f'CREATE VOLUME IF NOT EXISTS `{config.catalogue_name}`.`{config.db_name}`.`{config.volume_name}`')
 
-    remote_path = '/Volumes/dev/db/vol_name/raw/date-lookup.json'
+    remote_path = f'/Volumes/{config.catalogue_name}/{config.db_name}/{config.volume_name}/{config.base_data_path}/tests/date-lookup.json'  # noqa: E501
     local_path = Path(__file__).parent.parent / 'data' / 'date-lookup.json'
 
     w = WorkspaceClient()
