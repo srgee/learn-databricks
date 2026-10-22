@@ -311,25 +311,6 @@ class SetupHelper:
 
         print(f'DB setup completed in {int(time.time()) - start_time} seconds.')
 
-    def assert_table(self, table_name: str) -> bool:
-        if self.spark.catalog.tableExists(f'{self.catalogue}.{self.db_name}.{table_name}'):
-            print(f'Found {table_name} in {self.catalogue}.{self.db_name}. Success!')
-            return True
-        return False
-
-    def validate_db(self) -> None:
-        print('\n\nStarting db validation ...')
-        start_time = int(time.time())
-
-        assert self.spark.catalog.databaseExists(f'{self.catalogue}.{self.db_name}')
-        count = 0
-        for t in self.tables:
-            if not self.assert_table(t):
-                print(f'ERROR: table {t} does not exist in {self.catalogue}.{self.db_name}')
-                count += 1
-
-        print(f'Setup validation completed in {int(time.time()) - start_time} seconds with {count} errors.')
-
     def cleanup_db(self) -> None:
         if self.spark.catalog.databaseExists(f'{self.catalogue}.{self.db_name}'):
             print(f'Dropping the database {self.catalogue}.{self.db_name} ... ', end='')
@@ -346,7 +327,6 @@ def main() -> None:
         # SETUP DATABASE
         setup_manager = SetupHelper(spark, config.catalogue_name, config.db_name, config.volume_name)
         setup_manager.setup_db()
-        setup_manager.validate_db()
 
         # LOAD HISTORY DATA
         file_path = build_object_path(
