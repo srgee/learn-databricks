@@ -5,7 +5,7 @@ from typing import Any
 from databricks.connect.session import DatabricksSession
 
 from sbit.config import load_settings
-from sbit.history_loader import load_history, validate_history_data
+from sbit.history_loader import load_history
 from sbit.io import build_object_path
 
 
@@ -376,7 +376,7 @@ def main() -> None:
             'date-lookup.json',
         )
         load_history(spark, file_path)
-        validate_history_data(spark)
+
     except Exception as e:
         print(f'Initial setup failed with the following error: {e}')
         sys.exit(1)

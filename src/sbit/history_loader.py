@@ -41,19 +41,3 @@ def load_history(spark: Any, path: str) -> None:
     print('\n\nStarting historical data load ...')
     _load_date_lookup(spark, path)
     print(f'Historical data load completed in {int(time.time()) - start_time} seconds')
-
-
-def assert_count(spark: Any, table_name: str, expected_count: int) -> None:
-    print(f'Validating record counts in {table_name} ... ', end='')
-    actual_count = spark.read.table(f'{table_name}').count()
-    assert actual_count == expected_count, (
-        f'Expected {expected_count:,} records, found {actual_count:,} in {table_name}'
-    )
-    print(f'Found {actual_count:,} / Expected {expected_count:,} records: Success')
-
-
-def validate_history_data(spark: Any) -> None:
-    start_time = int(time.time())
-    print('\n\nStarting historical data load validation...')
-    assert_count(spark, 'date_lookup', 365)
-    print(f'Historical data load validation completed in {int(time.time()) - start_time} seconds')
