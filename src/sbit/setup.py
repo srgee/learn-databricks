@@ -14,7 +14,6 @@ class SetupHelper:
         self.spark = spark
         self.catalogue: str = catalogue_name
         self.db_name: str = db_name
-        self.volume_name: str = volume_name
         self.initialized: bool = False
         self.tables: list[str] = [
             'registered_users_bz',
@@ -331,26 +330,11 @@ class SetupHelper:
 
         print(f'Setup validation completed in {int(time.time()) - start_time} seconds with {count} errors.')
 
-    def create_volume(self) -> None:
-        print(f'\n\nCreating volume {self.volume_name} ... ', end='')
-        self.spark.sql(f'CREATE VOLUME IF NOT EXISTS {self.catalogue}.{self.db_name}.{self.volume_name}')
-        print('Done!')
-
-    def validate_volume(self) -> None:
-        print(f'Validating volume {self.volume_name} ... ', end='')
-        self.spark.sql(f"""DESCRIBE VOLUME {self.catalogue}.{self.db_name}.{self.volume_name}""")
-        print('Done!')
-
     def cleanup_db(self) -> None:
         if self.spark.catalog.databaseExists(f'{self.catalogue}.{self.db_name}'):
             print(f'Dropping the database {self.catalogue}.{self.db_name} ... ', end='')
             self.spark.sql(f'DROP DATABASE IF EXISTS {self.catalogue}.{self.db_name} CASCADE')
             print('Done!')
-
-    def clean_up(self) -> None:
-        print(f'Dropping volume {self.volume_name} ... ', end='')
-        self.spark.sql(f'DROP VOLUME IF EXISTS {self.catalogue}.{self.db_name}.{self.volume_name}')
-        print('Done!')
 
 
 def main() -> None:
@@ -363,8 +347,6 @@ def main() -> None:
         setup_manager = SetupHelper(spark, config.catalogue_name, config.db_name, config.volume_name)
         setup_manager.setup_db()
         setup_manager.validate_db()
-        setup_manager.create_volume()
-        setup_manager.validate_volume()
 
         # LOAD HISTORY DATA
         file_path = build_object_path(
