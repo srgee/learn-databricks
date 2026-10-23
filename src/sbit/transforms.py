@@ -47,7 +47,7 @@ def calculate_age_bins(dob_col):
     """
     age = F.floor(F.months_between(F.current_date(), dob_col) / 12)
     return (
-        F.when(age < 10, 'under 18')
+        F.when(age < 18, 'under 18')
         .when(age < 25, '18-24')
         .when(age < 35, '25-34')
         .when(age < 45, '35-44')
