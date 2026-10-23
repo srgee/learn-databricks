@@ -26,11 +26,12 @@ dev = [
 
 [pytest]
 minversion = "9.0"
-addopts = "-ra -q --strict-markers"
+addopts = "-ra -q --strict-markers --strict-markers"
+import-mode = "importlib"  # Avoid sys.path collisions when test files share names across directories
 testpaths = ["tests"]
 markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests requiring spark or external resources",
+    "unit: marks fast test cases",
+    "integration: marks tests requiring spark or external resources",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
