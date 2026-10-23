@@ -23,6 +23,26 @@ class StreamSpec:
 
 
 class UpsertPipeline:
+    '''Streaming MERGE pipeline that upserts source rows into a Delta target.
+
+    Reads changes from a source Delta table via ``readStream`` and applies
+    an idempotent ``MERGE INTO`` on the target for each micro-batch. The
+    merge key is configurable; re-runs of the same batch converge to the
+    same target state, so replays are safe.
+
+    The stream's starting point is controlled by ``startingVersion``, a
+    Delta log version integer (``0`` = from table creation, ``"earliest"``,
+    or ``"latest"``). It is honored only when the checkpoint is empty; on
+    restart, the checkpoint's stored offset takes precedence and
+    ``startingVersion`` is ignored. To force re-reading from a specific
+    version, clear the checkpoint directory first.
+
+    Attributes:
+        spark: active spark session.
+        starting_version: Delta log version to start streaming from.
+        checkpoint_root: Volume path where the stream offset is persisted.
+    """'''
+
     def __init__(self, spark: SparkSession, checkpoint_root: str, starting_version: int = 0) -> None:
         self.spark = spark
         self.checkpoint_root = checkpoint_root
