@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from _helpers import DataProducer
 from databricks.connect import DatabricksSession
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import SparkSession
@@ -30,49 +31,36 @@ def date_lookup_file(spark: SparkSession, config: Config) -> str:
     local_path = Path(__file__).parent.parent / 'data' / 'date-lookup.json'
 
     w = WorkspaceClient()
-    with open(local_path, 'rb') as f:
-        w.files.upload(remote_path, f, overwrite=True)
+    w.files.upload_from(remote_path, str(local_path), overwrite=True)
 
     return remote_path
 
 
+@pytest.fixture(scope='session')
+def data_files(config: Config) -> list[str]:
+    """Uploads all files from tests/data/ to the volume and returns
+    the list of remote paths (strings)."""
+    w = WorkspaceClient()
+    local_base = Path(__file__).parent.parent / 'data'
+    remote_base = (
+        f'/Volumes/{config.catalogue_name}/{config.db_name}/{config.volume_name}/{config.base_data_path}/tests'
+    )
+
+    remote_paths: list[str] = []
+    if local_base.exists():
+        for file_path in local_base.glob('*'):
+            if file_path.is_file():
+                remote_path = f'{remote_base}/{file_path.name}'
+                w.files.upload_from(remote_path, str(file_path), overwrite=True)
+                remote_paths.append(remote_path)
+    return remote_paths
+
+
 @pytest.fixture
-def wearable_sample_data():
-    """Test data for pipelines and transformations."""
-    return [
-        {
-            'device_id': 'wearable-001',
-            'timestamp': '2026-10-22T08:00:00Z',
-            'heart_rate': 72,
-            'steps': 0,
-            'accelerometer': (0.12, -0.05, 9.81),
-        },
-        {
-            'device_id': 'wearable-001',
-            'timestamp': '2026-10-22T08:01:00Z',
-            'heart_rate': 78,
-            'steps': 12,
-            'accelerometer': (0.31, -0.18, 9.76),
-        },
-        {
-            'device_id': 'wearable-001',
-            'timestamp': '2026-10-22T08:02:00Z',
-            'heart_rate': 81,
-            'steps': 28,
-            'accelerometer': (0.45, -0.22, 9.70),
-        },
-        {
-            'device_id': 'wearable-002',
-            'timestamp': '2026-10-22T08:00:00Z',
-            'heart_rate': 65,
-            'steps': 0,
-            'accelerometer': (0.08, 0.01, 9.80),
-        },
-        {
-            'device_id': 'wearable-002',
-            'timestamp': '2026-10-22T08:01:00Z',
-            'heart_rate': 70,
-            'steps': 5,
-            'accelerometer': (0.20, -0.10, 9.77),
-        },
-    ]
+def data_producer(spark, config):
+    data_dir = Path(__file__).parent.parent / 'data'
+    return DataProducer(
+        spark=spark,
+        config=config,
+        local_data_root=data_dir,
+    )

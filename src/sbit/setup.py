@@ -31,6 +31,7 @@ class SetupHelper:
             'gym_summary',
             'workout_bpm_summary',
         ]
+        self.volume_name = volume_name
 
     def create_db(self) -> None:
         print(f'Creating the database {self.catalogue}.{self.db_name}... ', end='')
@@ -317,6 +318,16 @@ class SetupHelper:
             self.spark.sql(f'DROP DATABASE IF EXISTS {self.catalogue}.{self.db_name} CASCADE')
             print('Done!')
 
+    def setup_volume(self) -> None:
+        print(f'Creating volume {self.volume_name} ... ', end='')
+        self.spark.sql(f'CREATE VOLUME IF NOT EXISTS {self.catalogue}.{self.db_name}.{self.volume_name}')
+        print('Done!')
+
+    def cleanup_volume(self) -> None:
+        print(f'Dropping the volume {self.catalogue}.{self.db_name}.{self.volume_name} ... ', end='')
+        self.spark.sql(f'DROP VOLUME IF EXISTS {self.catalogue}.{self.db_name}.{self.volume_name}')
+        print('Done!')
+
 
 def main() -> None:
     try:
@@ -327,6 +338,7 @@ def main() -> None:
         # SETUP DATABASE
         setup_manager = SetupHelper(spark, config.catalogue_name, config.db_name, config.volume_name)
         setup_manager.setup_db()
+        setup_manager.setup_volume()
 
         # LOAD HISTORY DATA
         file_path = build_object_path(

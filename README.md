@@ -1,9 +1,72 @@
 
-WEARABLE DATA PROCESSOR OVER DATALAKEHOUSE: wearpipe
+# Werable Data Processor over DataLakehouse
+
+An end-to-end streaming medallion pipeline (Bronze → Silver → Gold) that ingests IoT and application data from a fictional gym chain (user registrations, gym check-ins, and a Kafka event stream user profiles, workouts, heart-rate telemetry).
+
+Built to run entirely on Databricks Free Edition through Databricks Connect (Python),and deliberately structured like a production repository to serve as a learning project on applying software engineering best practices to modern data engineering.
+
+No paid Databricks account is required. Every design decision in this repo (path formats, checkpoint locations, schema handling) accounts for the constraints of the free tier instead of fighting them.
+
+# What will you learn?
+
+- Real architecture, toy-sized data. The full medallion pattern (Auto Loader,CDC streaming, MERGE upserts, streaming aggregations) on a dataset small enough to reprocess in seconds.
+- Production-shaped repository. Packaging (Python wheel), Asset Bundles,configuration with a documented priority chain, and tests. The engineering practices that tutorials usually skip.
+- Every layer is observable. With Unity Catalog you can watch raw files become bronze tables, then curated silver entities, then gold aggregates. All fromCatalog Explorer.
+- Documented failure modes. The compatibility playbookbelow records real errors hit while building this, so you learn why the rulesexist, not just the rules.
+
+# Engineering highlights
+- Specs vs. engines. SourceFeed / StreamSpec / MergeSpec dataclasses describe what flows; the two engines define how. Custom build_df builderscover the irregular cases (stream–stream joins, aggregations).
+- One source of configuration truth. A frozen Settings dataclass declares eachsetting once (flag, env var, default); the CLI parser is generated from it.Resolution order: CLI > environment > .env > defaults.
+- MERGE safety policies. Every target declares its update semantics:insert-only (immutable facts), last-writer-wins (user_profile),SCD Type 1 (user_bins), monotonic advance (gym_logs). All MERGEs areidempotent by business key, which is what makes replays and backfills safe.
+- Explicit phase orchestration. Dependent targets run in declared phases(PHASES); a phase fully drains before the next starts.
+- Two trigger modes. Default availableNow (drain everything, exit — ideal onmetered/free compute) or continuous --stream --processing-time 30 seconds.
+
+# Prerequisites
+- A Databricks Free Edition account
+- Python
+- Databricks Connect (la version que usamos es anituguua. Esta impuesta por el runtime de databricks. Busca URL para documentar esto)
+- Databricks CLI
+- Existing Databricks workspace, catalogue and volume
+- History and lookup data in Databricks volume (date-lookup.json available in the repo)
+
+# Setup
+git clone <repo-url> && cd <repo>uv venv && source .venv/bin/activate      # or python -m venvuv pip install -e ".[dev]"                # editable install incl. databricks-connect
+Authenticate once — Databricks Connect picks it up:
+
+databricks auth login --host https://<your-workspace>.databricks.com
+Copy .env.example to .env and adjust (DATABRICKS_CONFIG_PROFILE, GYM_ENV, ...).Keep .env out of version control — it is gitignored by default.
+
+
+# Load data & deploy schema
+sbit load-history          # uploads raw fixtures + builds date_lookup (idempotent)sbit deploy                # applies sql/ DDL: schema, tables, volumes
+Run the pipeline
+sbit --layer bronze        # Auto Loader: raw files → bronze (availableNow)sbit --layer silver        # CDC streams + MERGE: bronze → silversbit --layer gold          # aggregation: silver → gold
+Or run it as a Databricks Job
+databricks bundle deploy   # uploads the wheel and the job definitiondatabricks bundle run sbit_pipeline
+The job chains the tasks in dependency order: deploy_ddl → bronze → silver → gold.
+
+# Configuration
+Every setting follows the same priority chain — CLI beats environment, environmentbeats .env, .env beats defaults:
+
+Aquí tienes la información organizada en una tabla Markdown:
+
+| Flag | Env var | Default | Purpose |
+| --- | --- | --- | --- |
+| `--env` | `GYM_ENV` | `dev` | Unity Catalog (catalog name) to run against |
+| `--layer` | `GYM_LAYER` | `bronze` | `bronze` | `silver` | `gold` |
+| `--stream` | `GYM_STREAM` | `off` | continuous mode instead of `availableNow` |
+| `--processing-time` | `GYM_PROCESSING_TIME` | `5 seconds` | trigger interval in continuous mode |
+| `--starting-version` | `GYM_STARTING_VERSION` | `0` | Delta version to read from (only with an empty checkpoint — for backfills) |
+
+
+# Next steps
+
 
 Proyecto de aprendiza Databricks. Se basa en capstoone project del curso de Udemy Streaming Processin con Databricks.
 
 Este proyecto aplica las mejores practicas de ingenieria del softwar para el procesamiento de datos en streaming con Databricks..
+
+El proyecto asume la existencia de un catalogo en Databricks, no crea un catalogo nuevo.
 
 Best practices recommend use separate databases for bronze, silver and gold. For simplicity, this project uses a single databse for all medallion layers.
 
@@ -119,35 +182,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 ```
-
-```python
-# Pattern for dual sessions: dev/CI/CD on databricks-connect | prod on DBR
-# src/etl_ventas/runtime.py
-"""Fábrica de SparkSession dual.
-
-- En Databricks (job/notebook): la sesión nativa del cluster.
-- En local/CI (con databricks-connect): sesión remota por gRPC.
-"""
-
-import os
-
-
-def get_spark():
-    if 'DATABRICKS_RUNTIME_VERSION' in os.environ:
-        # Ejecutándose DENTRO de Databricks (job, notebook, pipeline)
-        from pyspark.sql import SparkSession
-
-        return SparkSession.builder.getOrCreate()
-
-    # Ejecutándose en local o CI
-    from databricks.connect import DatabricksSession
-
-    return DatabricksSession.builder.remote().getOrCreate()
-    # serverless: DatabricksSession.builder.remote(serverless=True).getOrCreate()
-```
-
-
-
 Pasos:
 1. Autenticacion interactiva (una sólo vez en dev): ejemplo `databricks auth login --host https://adb-123456789.azuredatabricks.net`. Esto crea un perfil en ~/.databrickscfg
 2. Añade `serverless_compute_id = auto` a el archivo ~/.databrickscfg para que el código sea válido tanto para prod como para dev
@@ -169,38 +203,6 @@ Se espera que la tabla kafka_multiplex_bz almacena datos masivos por lo que se r
 
 En lugar de implementar una función por cada tabla de la capa Bronze, adoptamos un diseño dirigido por datos. Cada fuente de datos es un dato, no un método. Esto nos permite eliminar redundancia en el código y facilita la mantenibilidad. La forma de recolectar datos es muy similar en este capa.
 
-Sample tests:
-```python
-# tests/integration/conftest.py
-import pytest
-from databricks.connect import DatabricksSession
-
-
-@pytest.fixture(scope='session')
-def spark():
-    return DatabricksSession.builder.remote().getOrCreate()
-
-
-# tests/integration/test_pipeline.py
-from etl_ventas.transform import dedupe
-
-
-def test_dedupe_contra_datos_reales(spark):
-    df = spark.table('dev.bronze.customers').limit(1000)
-    result = dedupe(df, keys=['id'])
-    assert result.count() <= df.count()
-
-
-# tests/unit/test_transform.py
-from chispa import assert_df_equality
-from etl_ventas.transform import dedupe
-
-
-def test_dedupe(spark_local):  # fixture con pyspark local (sin cluster)
-    df = spark_local.createDataFrame([(1, 'a'), (1, 'a'), (2, 'b')], 'id int, v string')
-    assert_df_equality(dedupe(df, ['id']), spark_local.createDataFrame([(1, 'a'), (2, 'b')], 'id int, v string'))
-```
-Piramide recomendada: lo mas rapido y numeroso son los test unitarios con Spark local
 
 ```yaml
 # FASE 4
@@ -365,34 +367,11 @@ databricks bundle deploy -t dev
 databricks bundle run etl_ventas_customers -t dev
 
 
-Si se desea montar tests unitarios locales con Spark local se recomienda python-slim + pyspark
-
-DECISION:
+MEJORA:
 14/10: para proyecto de aprendizaje mantenemos el aprovisionamiento de recursos via SQL DDL. Se deja como mejora la integración con herramientas IaC
 como Terraform o Pulumi. Sin embargo, queda pendiente la refactorizacion para implementar el layout profesional. En este caso, debemos sacar toda la logica DDL de la aplicacion para que se invoque coo un paso mas del CI antes del bundle deploy. Para ello debemos mover todo el codigo DDL a un modulo bootstrap.py en la carpeta raiz. También creamos un nuevo modulo preconditions.py dentro de "lib" para las validaciones (valida los recursos de infra necesarios para el proyecto).
 
-DECISION TESTING: para la version inicial se usa databricks.connect para el juego de tests, sin embargo el fixture ppal en conftest.py incluye el uso de una variable de entorno para habilitar el uso de un backend local sin cambiar el código del juego de tests:
-```python
-import os
-
-
-@pytest.fixture(scope='session')
-def spark():
-    if os.getenv('SPARK_TEST_BACKEND', 'remote') == 'local':
-        from pyspark.sql import SparkSession
-
-        return SparkSession.builder.master('local[2]').getOrCreate()
-
-    from databricks.connect import DatabricksSession
-
-    return DatabricksSession.builder.remote(serverless=True).getOrCreate()
-```
-
-Configuracion: envars + cli args (sobreescribe envars)
-
 MEJORA: sustituir print por logging
-
-OBJETIVO: 0 dependencias externas (solo libreria standard de Python) ==> workers mas ligeros (sin interprete Python)
 
 SPARK CONFIG:
 
@@ -411,8 +390,12 @@ Configura **RocksDB** como el proveedor del almacén de estado para *Spark Struc
 TODO (19/10)
 - Yaml de produccion (ver abajo ejemplo)
 - Añadir tests (ver ejemplo abajo)
-- Renombrar paquete (sbit --> wearpipe)
-- MOver build_path function para eliminar io.py module (solo 1 funcion)
+- REFACTOR: Renombrar paquete (sbit --> wearpipe)
+- REFACTOR: Mover build_path function para eliminar io.py module (solo 1 funcion)
+- REFACTOR: añade comilla invertidad en la formacion dinamica de SQL
+- REFACTOR: eliminar io.py
+- TEST: Schema drift: every deployed table must match the columns declared in thespecs/DDL — a renamed audit column fails here in one line, not as aSTREAM_FAILED in production
+- CONFIG: flag to switch stream/batch modes (pocessing_times para microbatches??)
 
 ```yaml
 tasks:
@@ -431,17 +414,6 @@ tasks:
     depends_on: [{task_key: silver}]
     python_wheel_task: {package_name: gym-pipeline, entry_point: gym-pipeline,
                         parameters: ["--layer", "gold", "--env", "${bundle.target}"]}
-```
-
-```python
-def test_layer_choices_rejected_at_parser_level(capsys):
-    with pytest.raises(SystemExit):  # argparse aborta con error 2
-        load(['--layer', 'staging'])
-    assert 'invalid choice' in capsys.readouterr().err
-
-
-def test_layer_choices_accepted():
-    assert load(['--layer', 'silver']).layer == 'silver'
 ```
 
 --------------------------------------------------------------------------------------------------------------

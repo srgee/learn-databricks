@@ -8,7 +8,7 @@ from sbit.bronze_specs import FEEDS
 from sbit.config import load_settings
 from sbit.gold_specs import GOLD_PHASES, GOLD_STREAMS
 from sbit.io import build_object_path
-from sbit.silver_specs import PHASES, SILVER_STREAMS
+from sbit.silver_specs import SILVER_PHASES, SILVER_STREAMS
 from sbit.streaming import UpsertPipeline
 
 
@@ -38,7 +38,7 @@ def main():
                 config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/silver'
             )
             UpsertPipeline(spark, checkpoint_root, starting_version=config.starting_version).run(
-                SILVER_STREAMS, PHASES, once=once
+                SILVER_STREAMS, SILVER_PHASES, once=once
             )
         elif config.layer == 'gold':
             # --- RUN GOLD PIPELINE ---
@@ -63,7 +63,7 @@ def main():
                 config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/silver'
             )
             UpsertPipeline(spark, checkpoint_root, starting_version=config.starting_version).run(
-                SILVER_STREAMS, PHASES, once=once
+                SILVER_STREAMS, SILVER_PHASES, once=once
             )
             print('Done!')
             print('Starting to run GOLD pipeline ... ', end='')

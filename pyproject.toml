@@ -26,7 +26,7 @@ dev = [
 
 [pytest]
 minversion = "9.0"
-addopts = "-ra -q --strict-markers -s"
+addopts = "-ra -q --strict-markers -x --durations=10"
 import-mode = "importlib"  # Avoid sys.path collisions when test files share names across directories
 testpaths = ["tests"]
 markers = [
