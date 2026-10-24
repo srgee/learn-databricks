@@ -32,6 +32,7 @@ testpaths = ["tests"]
 markers = [
     "unit: marks fast test cases",
     "integration: marks tests requiring spark or external resources",
+    "slow: marks slow tests"
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
