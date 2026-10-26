@@ -21,7 +21,5 @@ wheels/
 .DS_Store?
 Thumbs.db
 
-# Logs y datos locales de prueba
+# Logs
 *.log
-*.parquet
-*.csv
