@@ -17,7 +17,7 @@ class SourceFeed:
 
 FEEDS = [
     SourceFeed(
-        name='reg_users_bz',
+        name='registered_users_bz',
         file_format='csv',
         schema='user_id long, device_id long, mac_address string, registration_timestamp double',
         transform=add_audit_columns,
