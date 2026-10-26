@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-from sbit.streaming import StreamSpec
+from sbit.gold import GoldSpec
 from sbit.upserters import MergeSpec
 
 
@@ -36,8 +36,8 @@ def build_workout_bpm_summary(spark: SparkSession, starting_version: int):
     )
 
 
-GOLD_STREAMS: dict[str, StreamSpec] = {
-    'workout_bpm_summary': StreamSpec(
+GOLD_STREAMS: dict[str, GoldSpec] = {
+    'workout_bpm_summary': GoldSpec(
         name='workout_bpm_summary',
         source='workout_bpm',
         build_df=build_workout_bpm_summary,  # not following the pattern aggregation + static join
@@ -45,7 +45,6 @@ GOLD_STREAMS: dict[str, StreamSpec] = {
         merge=MergeSpec(
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id AND t.session_id = s.session_id'
         ),
-        output_mode='append',
     ),
 }
 
