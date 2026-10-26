@@ -26,7 +26,7 @@ FEED_FIXTURES: tuple[FeedFixture, ...] = (
     FeedFixture('user_info_{set}.json', 'kafka_multiplex_bz'),
     FeedFixture('workout_{set}.json', 'kafka_multiplex_bz'),
     FeedFixture('bpm_{set}.json', 'kafka_multiplex_bz'),
-    FeedFixture('gym_logins_{set}.csv', 'kafka_multiplex_bz'),
+    FeedFixture('gym_logins_{set}.csv', 'gym_logins_bz'),
 )
 
 AVAILABLE_SETS = (1, 2)
@@ -68,7 +68,7 @@ class DataProducer:
 
     def produce(self, set_num: int) -> None:
         if set_num not in AVAILABLE_SETS:
-            available = ', '.join(str(s) for s in self.available_sets)
+            available = ', '.join(str(s) for s in AVAILABLE_SETS)
             raise ValueError(f'set_num={set_num} not in available sets: [{available}]')
         print(f'Producing test data set {set_num}')
         for feed in self.feeds:
