@@ -24,20 +24,15 @@ def _transform_date_lookup(df: DataFrame) -> DataFrame:
 
 
 def _load_date_lookup(spark: Any, path: str) -> None:
-    print('Loading data into date_lookup table ... ', end='')
-
-    print(f'Loading data from {path} ... ', end='')
     (
         _transform_date_lookup(spark.read.option('multiline', 'true').format('json').load(path))
         .write.mode('overwrite')
         .saveAsTable('date_lookup')
     )
 
-    print('Done!')
-
 
 def load_history(spark: Any, path: str) -> None:
     start_time = int(time.time())
-    print('\n\nStarting historical data load ...')
+    print('\nStarting historical data load ...')
     _load_date_lookup(spark, path)
     print(f'Historical data load completed in {int(time.time()) - start_time} seconds')
