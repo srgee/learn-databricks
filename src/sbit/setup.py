@@ -1,8 +1,10 @@
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from databricks.connect.session import DatabricksSession
+from databricks.sdk import WorkspaceClient
 
 from sbit.config import load_settings
 from sbit.history_loader import load_history
@@ -10,7 +12,7 @@ from sbit.io import build_object_path
 
 
 class SetupHelper:
-    def __init__(self, spark: Any, catalogue_name: str, db_name: str, volume_name: str) -> None:
+    def __init__(self, spark: Any, catalogue_name: str, db_name: str, volume_name: str, data_root: str) -> None:
         self.spark = spark
         self.catalogue: str = catalogue_name
         self.db_name: str = db_name
@@ -32,6 +34,8 @@ class SetupHelper:
             'workout_bpm_summary',
         ]
         self.volume_name = volume_name
+        self.volume_exists: bool = False
+        self.data_root = data_root
 
     def create_db(self) -> None:
         print(f'Creating the database {self.catalogue}.{self.db_name}... ', end='')
@@ -320,13 +324,38 @@ class SetupHelper:
 
     def setup_volume(self) -> None:
         print(f'Creating volume {self.volume_name} ... ', end='')
-        self.spark.sql(f'CREATE VOLUME IF NOT EXISTS {self.catalogue}.{self.db_name}.{self.volume_name}')
+
+        full_name = f'`{self.catalogue}`.`{self.db_name}`.`{self.volume_name}`'
+        self.spark.sql(f'CREATE VOLUME IF NOT EXISTS {full_name}')
+        result = self.spark.sql(
+            f'SELECT 1 FROM `{self.catalogue}`.information_schema.volumes '
+            f"WHERE volume_name = '{self.volume_name}' "
+            f"  AND volume_schema = '{self.db_name}' "
+            f"  AND volume_catalog = '{self.catalogue}'"
+        ).collect()
+
+        if not result:
+            self.is_volume_created = False
+            raise RuntimeError(f'Volume {full_name} not found in information_schema after CREATE')
+        self.volume_exists = True
+
         print('Done!')
 
     def cleanup_volume(self) -> None:
         print(f'Dropping the volume {self.catalogue}.{self.db_name}.{self.volume_name} ... ', end='')
-        self.spark.sql(f'DROP VOLUME IF EXISTS {self.catalogue}.{self.db_name}.{self.volume_name}')
+        self.spark.sql(f'DROP VOLUME IF EXISTS `{self.catalogue}`.`{self.db_name}`.`{self.volume_name}`')
         print('Done!')
+
+    def upload_date_lookup_file(self) -> str:
+        remote_path = (
+            f'/Volumes/{self.catalogue}/{self.db_name}/{self.volume_name}/{self.data_root}/tests/date-lookup.json'  # noqa: E501
+        )
+        local_path = Path(__file__).parent.parent.parent / 'data' / 'date-lookup.json'
+
+        w = WorkspaceClient()
+        w.files.upload_from(remote_path, str(local_path), overwrite=True)
+
+        return remote_path
 
 
 def main() -> None:
@@ -336,9 +365,17 @@ def main() -> None:
         spark = DatabricksSession.builder.getOrCreate()
 
         # SETUP DATABASE
-        setup_manager = SetupHelper(spark, config.catalogue_name, config.db_name, config.volume_name)
+        setup_manager = SetupHelper(
+            spark, config.catalogue_name, config.db_name, config.volume_name, config.base_data_path
+        )
         setup_manager.setup_db()
+
+        # SETUP VOLUME
         setup_manager.setup_volume()
+
+        # UPLOAD HISTORY FILES
+        if setup_manager.is_volume_created:
+            setup_manager.upload_date_lookup_file()
 
         # LOAD HISTORY DATA
         file_path = build_object_path(
