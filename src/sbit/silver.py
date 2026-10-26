@@ -1,0 +1,225 @@
+"""Silver layer: stream CDF from Bronze, stage changes, MERGE into Silver targets.
+
+Architecture:
+    Each Silver target is produced by:
+    1. Streaming: read CDF changes from the Bronze source (or build the
+       stream via ``build_df`` for stream-stream joins / aggregations),
+       apply the spec's transform + watermark + dropDuplicates, append
+       to an ephemeral ``{name}_stage`` Delta table.
+    2. Batch MERGE: when the stream drains, read the stage as a batch
+       DataFrame, apply ``batch_transform`` if present, and MERGE into the
+       target table using the DeltaTable API.
+
+This stage + batch-MERGE pattern replaces the original ``foreachBatch``
+approach, whose isolated Python worker sandbox failed to start on Databricks
+Serverless compute accessed through Spark Connect
+(``ISOLATION_STARTUP_FAILURE.SANDBOX_STARTUP``).
+
+The pipeline's public API (``run(specs, phases, once=True)``), checkpoint
+locations (``silver_{name}``), watermark, ``dropDuplicates``, and
+``batch_transform`` semantics are preserved from the original ``UpsertPipeline``.
+"""
+
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from delta.tables import DeltaTable
+from pyspark.sql import SparkSession
+from pyspark.sql.dataframe import DataFrame
+from pyspark.sql.streaming.query import StreamingQuery
+
+from sbit.upserters import MergeSpec  # import temporal hasta el paso 2
+
+
+# ============================================================
+# Spec
+# ============================================================
+@dataclass(frozen=True)
+class SilverSpec:
+    """Specification for a Silver target.
+
+    Attributes:
+        name: Target table short name.
+        source: Source table short name (a Bronze table, or another Silver
+            table for derived silver targets).
+        merge: MERGE semantics (join condition, update policy).
+        transform: Optional ``df -> df`` applied to the streaming source
+            before watermark/dedupe/stage. Pure function; must not read
+            external tables or capture the SparkSession.
+        batch_transform: Optional ``df -> df`` applied to the stage
+            DataFrame (batch) before the MERGE. Useful for last-writer-wins
+            deduplication that needs the full batch view.
+        dedupe_keys: Columns used for ``dropDuplicates`` in the streaming
+            phase. Requires ``watermark_col`` for state cleanup.
+        watermark_col: Event-time column for watermarking.
+        watermark_delay: Watermark delay (default 30 seconds).
+        ignore_changes: If True, read source with ``ignoreChanges=true``
+            (for sources that may emit updates, e.g. other Silver tables).
+            If False (default), read with ``ignoreDeletes=true``.
+        output_mode: IGNORED. Stage always uses ``append`` (requirement of
+            ``writeStream.toTable`` with Delta). Kept for backward
+            compatibility with existing specs; will be removed in a
+            follow-up cleanup.
+        build_df: Optional ``((spark, starting_version)) -> DataFrame``
+            builder for specs that need to construct the stream from
+            scratch (stream-stream joins, aggregations). When present,
+            ``source`` and ``transform`` are ignored.
+    """
+
+    name: str
+    source: str
+    merge: MergeSpec
+    transform: Callable[[DataFrame], DataFrame] | None = None
+    batch_transform: Callable[[DataFrame], DataFrame] | None = None
+    dedupe_keys: tuple[str, ...] = ()
+    watermark_col: str | None = None
+    watermark_delay: str = '30 seconds'
+    ignore_changes: bool = False
+    output_mode: str = 'update'  # ignored; kept for backward compat
+    build_df: Callable[[SparkSession, int], DataFrame] | None = None
+
+
+# ============================================================
+# Engine
+# ============================================================
+class SilverMerger:
+    """Stage + batch-MERGE pipeline for the Silver layer.
+
+    See module docstring for the architecture overview.
+
+    Args:
+        spark: Active SparkSession.
+        checkpoint_root: UC volume path where stream offsets are persisted
+            (e.g. ``/Volumes/cat/db/vol/checkpoint_zone``).
+        starting_version: Delta log version to start streaming from
+            (``0`` = from table creation, ``"earliest"``, or ``"latest"``).
+            Honored only when the checkpoint is empty; on restart the
+            checkpoint's stored offset takes precedence.
+    """
+
+    def __init__(
+        self,
+        spark: SparkSession,
+        checkpoint_root: str,
+        starting_version: int = 0,
+    ) -> None:
+        self.spark = spark
+        self.checkpoint_root = checkpoint_root
+        self.starting_version = starting_version
+
+    # ---------- Helpers de fuente ----------
+
+    def _source_options(self, s: SilverSpec) -> dict:
+        key = 'ignoreChanges' if s.ignore_changes else 'ignoreDeletes'
+        return {'startingVersion': self.starting_version, key: 'true'}
+
+    def _build_input_df(self, s: SilverSpec) -> DataFrame:
+        """Build streaming input: custom build function or read from table (standard)."""
+        if s.build_df is not None:
+            return s.build_df(self.spark, self.starting_version)
+        df = self.spark.readStream.options(**self._source_options(s)).table(s.source)
+        return s.transform(df) if s.transform is not None else df
+
+    @staticmethod
+    def _stage_name(name: str) -> str:
+        return f'{name}_stage'
+
+    def _checkpoint_path(self, s: SilverSpec) -> str:
+        # 'silver_' hardcoded: this engine only handles silver.
+        # GoldBuilder (step 2) will use 'gold_' for its specs.
+        return f'{self.checkpoint_root}/silver_{s.name}'
+
+    def start(self, s: SilverSpec, once: bool = True, processing_time: str = '15 seconds') -> StreamingQuery:
+        """Start the writing stream that writes to the stage table (no forEach)."""
+        df = self._build_input_df(s)
+        if s.watermark_col:
+            df = df.withWatermark(s.watermark_col, s.watermark_delay)
+        if s.dedupe_keys:
+            df = df.dropDuplicates(list(s.dedupe_keys))
+
+        stage_table = self._stage_name(s.name)
+        checkpoint = self._checkpoint_path(s)
+
+        # If a previous run left the stage table behind (e.g., aborted test),
+        # drop it so the stream regenerates it with the current schema.
+        # The checkpoint is respected: the stream will only process new changes.
+        self.spark.sql(f'DROP TABLE IF EXISTS {stage_table}')
+
+        writer = (
+            df.writeStream.format('delta')
+            .outputMode('append')
+            .option('checkpointLocation', checkpoint)
+            .queryName(f'{s.name}_stage_stream')
+        )
+        writer = writer.trigger(availableNow=True) if once else writer.trigger(processingTime=processing_time)
+
+        return writer.toTable(stage_table)
+
+    def _ensure_target_exists(self, s: SilverSpec) -> None:
+        """Create target table if it does not exist."""
+        self.spark.sql(
+            f"""
+            CREATE TABLE IF NOT EXISTS {s.name}
+            USING DELTA
+            AS SELECT * FROM {self._stage_name(s.name)} WHERE 1=0
+            """
+        )
+
+    def _merge_stage_to_target(self, s: SilverSpec) -> None:
+        """MERGE batch stage with target table (native DeltaTable API)."""
+        stage_df = self.spark.read.table(self._stage_name(s.name))
+        if s.batch_transform is not None:
+            stage_df = s.batch_transform(stage_df)
+
+        self._ensure_target_exists(s)
+
+        target = DeltaTable.forName(self.spark, s.name)
+        builder = target.alias('t').merge(stage_df.alias('s'), s.merge.join_on)
+
+        if s.merge.update:
+            update_set = s.merge.update_set
+            condition = s.merge.update_condition
+            if update_set is None:
+                # UPDATE SET * (todas las columnas del source)
+                builder = (
+                    builder.whenMatchedUpdateAll(condition=condition) if condition else builder.whenMatchedUpdateAll()
+                )
+            else:
+                # UPDATE SET específico (dict de {col: expr})
+                builder = (
+                    builder.whenMatchedUpdate(condition=condition, set=update_set)
+                    if condition
+                    else builder.whenMatchedUpdate(set=update_set)
+                )
+
+        builder = builder.whenNotMatchedInsertAll()
+        builder.execute()
+
+    def _drop_stage(self, s: SilverSpec) -> None:
+        self.spark.sql(f'DROP TABLE IF EXISTS {self._stage_name(s.name)}')
+
+    def run(
+        self,
+        specs: dict[str, SilverSpec],
+        phases: list[list[str]],
+        once: bool = True,
+        processing_time: str = '15 seconds',
+    ) -> None:
+        """Orchestration."""
+        for phase in phases:
+            queries = [self.start(specs[name], once, processing_time) for name in phase]
+            if once:
+                for q in queries:
+                    q.awaitTermination()
+            for name in phase:
+                self._merge_stage_to_target(specs[name])
+                self._drop_stage(specs[name])
+
+
+# ============================================================
+# Alias temporal para compatibilidad retroactiva
+# ============================================================
+# Permite que el test y cualquier código existente sigan usando
+# `UpsertPipeline` mientras se completa la migración a la arquitectura
+# de tres engines (Bronze / Silver / Gold). Eliminar en el paso 4.
+UpsertPipeline = SilverMerger
