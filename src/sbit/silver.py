@@ -157,9 +157,11 @@ class SilverMerger:
 
     def _ensure_target_exists(self, s: SilverSpec) -> None:
         """Create target table if it does not exist, with the same schema as the stage."""
-        if self.spark.catalog.tableExists(s.name):
-            return
-        self.spark.read.table(self._stage_name(s.name)).limit(0).write.format('delta').saveAsTable(s.name)
+        stage_schema = self.spark.read.table(self._stage_name(s.name)).schema
+        builder = DeltaTable.createIfNotExists(self.spark).tableName(s.name)
+        for field in stage_schema.fields:
+            builder = builder.addColumn(field.name, field.dataType)
+        builder.execute()
 
     def _merge_stage_to_target(self, s: SilverSpec) -> None:
         """MERGE batch stage with target table (native DeltaTable API)."""
@@ -168,6 +170,18 @@ class SilverMerger:
             stage_df = s.batch_transform(stage_df)
 
         self._ensure_target_exists(s)
+
+        # Sanity check: the stage table should have the same schema as the target.
+        # Catches inconsistent schema changes.
+        target_fields = set(self.spark.read.table(s.name).schema.fieldNames())
+        source_fields = set(stage_df.schema.fieldNames())
+        if target_fields != source_fields:
+            missing = source_fields - target_fields
+            extra = target_fields - source_fields
+            raise RuntimeError(
+                f'[{s.name}] schema mismatch after _ensure_target_exists: '
+                f'missing in target={missing}, extra in target={extra}'
+            )
 
         target = DeltaTable.forName(self.spark, s.name)
         builder = target.alias('t').merge(stage_df.alias('s'), s.merge.join_on)
