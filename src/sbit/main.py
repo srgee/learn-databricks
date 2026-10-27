@@ -3,8 +3,7 @@ import time
 
 from databricks.connect.session import DatabricksSession
 
-from sbit.bronze import BronzeIngester
-from sbit.bronze_specs import FEEDS
+from sbit.bronze import FEEDS, BronzeIngester
 from sbit.config import load_settings
 from sbit.gold import GoldBuilder
 from sbit.gold_specs import GOLD_PHASES, GOLD_STREAMS
