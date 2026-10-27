@@ -164,7 +164,7 @@ def load_settings(argv: list[str] | None = None, env_file: str | Path | None = '
 
     Args:
         argv: List of command-line arguments. If None, sys.argv[1:] is used.
-        env_file: Path to .env file. If None, .env load is skipped.
+        env_file: Path to .env file. Skipped if None or if the file does not exist.
 
     Returns:
         Config instance
@@ -172,16 +172,17 @@ def load_settings(argv: list[str] | None = None, env_file: str | Path | None = '
     if env_file is not None and Path(env_file).is_file():
         _load_env_file(Path(env_file))
 
-    ns = build_parser().parse_args(argv)
+    ns = build_parser().parse_args(argv)  # sys.argv[1:] if argv is None else argv
     types = get_type_hints(Config)
     kwargs = {}
 
     for f in fields(Config):
         cli_value = getattr(ns, f.name)  # None if it did not come from CLI
-        env_value = os.getenv(f.metadata.get('env_var', 'NO_ENV_VAR'))  # None if it does not exit in the environment
+        env_var = f.metadata.get('env_var')
+        env_value = os.getenv('env_var') if env_var else None  # None if it does not exit in the environment
         if cli_value is not None:
             kwargs[f.name] = _cast(cli_value, types[f.name]) if isinstance(cli_value, str) else cli_value
-        elif env_value is not None and env_value != 'NO_ENV_VAR':
+        elif env_value is not None:
             kwargs[f.name] = _cast(env_value, types[f.name])
         else:
             kwargs[f.name] = f.default
