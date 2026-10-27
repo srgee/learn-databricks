@@ -1,7 +1,8 @@
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
-from sbit.streaming import StreamSpec
+from sbit.silver import SilverSpec
+from sbit.streaming import SilverSpec
 from sbit.transforms import calculate_age_bins, parse_kafka_topic
 from sbit.upserters import MergeSpec, dedup_latest
 
@@ -97,7 +98,7 @@ def build_workout_bpm(spark: SparkSession, starting_version: int) -> DataFrame:
 
 # --- DECLARE TARGETS ---
 SILVER_STREAMS = {
-    'users': StreamSpec(
+    'users': SilverSpec(
         name='users',
         source='registered_users_bz',
         transform=lambda df: df.selectExpr(
@@ -107,7 +108,7 @@ SILVER_STREAMS = {
         dedupe_keys=('user_id', 'device_id'),
         watermark_col='registration_timestamp',
     ),
-    'gym_logs': StreamSpec(
+    'gym_logs': SilverSpec(
         name='gym_logs',
         source='gym_logins_bz',
         transform=lambda df: df.selectExpr(
@@ -122,7 +123,7 @@ SILVER_STREAMS = {
         dedupe_keys=('mac_address', 'gym', 'login'),
         watermark_col='login',
     ),
-    'user_profile': StreamSpec(
+    'user_profile': SilverSpec(
         name='user_profile',
         source='kafka_multiplex_bz',
         transform=lambda df: parse_kafka_topic(
@@ -150,7 +151,7 @@ SILVER_STREAMS = {
         dedupe_keys=('user_id', 'updated'),
         watermark_col='updated',
     ),
-    'workouts': StreamSpec(
+    'workouts': SilverSpec(
         name='workouts',
         source='kafka_multiplex_bz',
         transform=lambda df: parse_kafka_topic(
@@ -162,7 +163,7 @@ SILVER_STREAMS = {
         dedupe_keys=('user_id', 'time'),
         watermark_col='time',
     ),
-    'heart_rate': StreamSpec(
+    'heart_rate': SilverSpec(
         name='heart_rate',
         source='kafka_multiplex_bz',
         transform=lambda df: parse_kafka_topic('bpm', 'device_id LONG, time TIMESTAMP, heartrate DOUBLE')(
@@ -172,7 +173,7 @@ SILVER_STREAMS = {
         dedupe_keys=('device_id', 'time'),
         watermark_col='time',
     ),
-    'user_bins': StreamSpec(
+    'user_bins': SilverSpec(
         name='user_bins',
         source='user_profile',
         ignore_changes=True,
@@ -181,7 +182,7 @@ SILVER_STREAMS = {
         ).select('user_id', calculate_age_bins(F.col('dob')), 'gender', 'city', 'state'),
         merge=MergeSpec(join_on='t.user_id = s.user_id', update=True),
     ),
-    'completed_workouts': StreamSpec(
+    'completed_workouts': SilverSpec(
         name='completed_workouts',
         source='workouts',
         build_df=build_completed_workouts,
@@ -190,7 +191,7 @@ SILVER_STREAMS = {
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id AND t.session_id = s.session_id'
         ),
     ),
-    'workout_bpm': StreamSpec(
+    'workout_bpm': SilverSpec(
         name='workout_bpm',
         source='completed_workouts',
         build_df=build_workout_bpm,
