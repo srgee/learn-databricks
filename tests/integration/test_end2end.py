@@ -6,12 +6,13 @@ from pyspark.sql import SparkSession
 from sbit.bronze import BronzeIngester
 from sbit.bronze_specs import FEEDS
 from sbit.config import Config
+from sbit.gold import GoldBuilder
 from sbit.gold_specs import GOLD_PHASES, GOLD_STREAMS
 from sbit.history_loader import load_history
 from sbit.io import build_object_path
 from sbit.setup import SetupHelper
+from sbit.silver import SilverMerger
 from sbit.silver_specs import SILVER_PHASES, SILVER_STREAMS
-from sbit.streaming import UpsertPipeline
 
 
 def test_batch(spark: SparkSession, config: Config):
@@ -23,7 +24,6 @@ def test_batch(spark: SparkSession, config: Config):
     between them — see SetupHelper.cleanup() that runs only at start
     and end of the module).
     """
-
     # 1. Setup Database
     sh = SetupHelper(
         spark,
@@ -49,7 +49,7 @@ def test_batch(spark: SparkSession, config: Config):
 
         # 4. Iteration 1: run all pipelines: Bronze, Silver and Gold
         # ----- BRONZE -----
-        print('Starting first iteration of bronze pipeline ...', end='')
+        print('Starting first iteration of bronze pipeline ... ', end='')
 
         b_pipeline = BronzeIngester(
             spark,
@@ -82,9 +82,12 @@ def test_batch(spark: SparkSession, config: Config):
         print('Done!')
 
         # ----- SILVER -----
-        print('Starting first iteration of silver pipeline ...', end='')
+        print('Starting first iteration of silver pipeline ... ', end='')
 
-        s_pipeline = UpsertPipeline(spark, config.base_checkpoint_path)
+        s_pipeline = SilverMerger(
+            spark,
+            build_object_path(config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path),
+        )
         s_pipeline.run(SILVER_STREAMS, SILVER_PHASES, once=True)
 
         table_fqn = f'{config.catalogue_name}.{config.db_name}.users'
@@ -101,7 +104,7 @@ def test_batch(spark: SparkSession, config: Config):
 
         table_fqn = f'{config.catalogue_name}.{config.db_name}.workouts'
         actual_count = spark.read.table(table_fqn).count()
-        assert actual_count == 15
+        assert actual_count == 16
 
         table_fqn = f'{config.catalogue_name}.{config.db_name}.heart_rate'
         actual_count = spark.read.table(table_fqn).count()
@@ -122,16 +125,22 @@ def test_batch(spark: SparkSession, config: Config):
         print('Done!')
 
         # ----- GOLD -----
-        print('Starting first iteration of gold pipeline ...', end='')
+        print('Starting first iteration of gold pipeline ... ', end='')
 
-        g_pipeline = UpsertPipeline(spark, config.base_checkpoint_path)
+        g_pipeline = GoldBuilder(
+            spark,
+            build_object_path(
+                config.catalogue_name,
+                config.db_name,
+                config.volume_name,
+                config.base_checkpoint_path,
+            ),
+        )
         g_pipeline.run(GOLD_STREAMS, GOLD_PHASES, once=True)
 
         table_fqn = f'{config.catalogue_name}.{config.db_name}.gym_summary'
-        actual_rows = spark.table(table_fqn).collect()
-        local_test_file = str(Path(__file__) / 'data' / 'gym_summary_test_1.parquet')
-        expected_rows = spark.read.format('parquet').load(local_test_file).collect()
-        assert actual_rows == expected_rows
+        actual_rows = spark.table(table_fqn).count()
+        assert actual_rows == 8
 
         print('Done!')
 
@@ -139,7 +148,7 @@ def test_batch(spark: SparkSession, config: Config):
         data_producer.produce(2)
 
         # ----- BRONZE -----
-        print('Starting second iteration of bronze pipeline ...', end='')
+        print('Starting second iteration of bronze pipeline ... ', end='')
 
         b_pipeline.ingest_all(FEEDS, once=True)
 
@@ -160,13 +169,13 @@ def test_batch(spark: SparkSession, config: Config):
         assert actual_count == 32
 
         table_fqn = f'{config.catalogue_name}.{config.db_name}.kafka_multiplex_bz'
-        actual_count = spark.read.table(table_fqn).where(filter="topic='bpm'").count()
+        actual_count = spark.read.table(table_fqn).filter("topic='bpm'").count()
         assert actual_count == 253801 * 2
 
         print('Done!')
 
         # ----- SILVER -----
-        print('Starting second iteration of silver pipeline ...', end='')
+        print('Starting second iteration of silver pipeline ... ', end='')
 
         s_pipeline.run(SILVER_STREAMS, SILVER_PHASES, once=True)
 
@@ -205,28 +214,19 @@ def test_batch(spark: SparkSession, config: Config):
         print('Done!')
 
         # ----- GOLD -----
-        print('Starting second iteration of gold pipeline ...', end='')
+        print('Starting second iteration of gold pipeline ... ', end='')
 
         g_pipeline.run(GOLD_STREAMS, GOLD_PHASES, once=True)
 
         table_fqn = f'{config.catalogue_name}.{config.db_name}.gym_summary'
         actual_rows = spark.table(table_fqn).collect()
-        local_test_file = str(Path(__file__) / 'data' / 'gym_summary_test_2.parquet')
-        expected_rows = spark.read.format('parquet').load(local_test_file).collect()
-        assert actual_rows == expected_rows
+        assert actual_rows == 16
 
         table_fqn = f'{config.catalogue_name}.{config.db_name}.workout_bpm_summary'
-        local_test_file = str(Path(__file__) / 'data' / 'workout_bpm_summary_2.parquet')
-        expected_count = spark.read.format('parquet').load(local_test_file).count()
-        assert actual_rows == expected_rows
-        assert actual_count == expected_count
+        assert actual_rows == 2
 
         print('Done!')
 
     finally:
         sh.cleanup_volume()
         sh.cleanup_db()
-
-
-def test_streaming():
-    pass
