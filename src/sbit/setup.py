@@ -162,7 +162,7 @@ class SetupHelper:
             CREATE TABLE IF NOT EXISTS {self.catalogue}.{self.db_name}.heart_rate(
                 device_id LONG,
                 time TIMESTAMP,
-                heart_rate DOUBLE,
+                heartrate DOUBLE,
                 valid BOOLEAN
             )"""
         )
@@ -229,7 +229,7 @@ class SetupHelper:
                 start_time TIMESTAMP,
                 end_time TIMESTAMP,
                 time TIMESTAMP,
-                heart_rate DOUBLE
+                heartrate DOUBLE
             )"""
         )
         print('Done!')
