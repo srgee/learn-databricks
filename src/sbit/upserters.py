@@ -1,19 +1,8 @@
 from collections.abc import Callable
-from dataclasses import dataclass
 
-from delta._typing import ColumnMapping
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
-
-
-@dataclass(frozen=True)
-class MergeSpec:
-    join_on: str
-    insert: bool = True  # When not matched then insert
-    update: bool = False  # when matched (and cond) then update
-    update_condition: str | None = None
-    update_set: ColumnMapping | None = None  # None means all cols (set *)
 
 
 def dedup_latest(id_col: str, order_col: str) -> Callable:

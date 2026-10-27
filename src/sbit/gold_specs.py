@@ -2,7 +2,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 from sbit.gold import GoldSpec
-from sbit.upserters import MergeSpec
+from sbit.specs import MergeSpec
 
 
 def build_workout_bpm_summary(spark: SparkSession, starting_version: int):

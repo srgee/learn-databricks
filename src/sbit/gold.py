@@ -25,7 +25,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.streaming.query import StreamingQuery
 
-from sbit.upserters import MergeSpec  # import temporal hasta mover MergeSpec a un módulo común
+from sbit.specs import MergeSpec  # import temporal hasta mover MergeSpec a un módulo común
 
 
 # ============================================================

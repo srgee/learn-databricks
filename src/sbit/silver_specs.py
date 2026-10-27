@@ -1,9 +1,9 @@
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
-from sbit.silver import SilverSpec
+from sbit.specs import MergeSpec, SilverSpec
 from sbit.transforms import calculate_age_bins, parse_kafka_topic
-from sbit.upserters import MergeSpec, dedup_latest
+from sbit.upserters import dedup_latest
 
 
 def _get_cdc_options(starting_version: int, ignore_changes: bool = False) -> dict:

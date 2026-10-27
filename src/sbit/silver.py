@@ -20,68 +20,14 @@ locations (``silver_{name}``), watermark, ``dropDuplicates``, and
 ``batch_transform`` semantics are preserved from the original ``UpsertPipeline``.
 """
 
-from collections.abc import Callable
-from dataclasses import dataclass
-
 from delta.tables import DeltaTable
 from pyspark.sql import SparkSession
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.streaming.query import StreamingQuery
 
-from sbit.upserters import MergeSpec  # import temporal hasta el paso 2
+from sbit.specs import SilverSpec
 
 
-# ============================================================
-# Spec
-# ============================================================
-@dataclass(frozen=True)
-class SilverSpec:
-    """Specification for a Silver target.
-
-    Attributes:
-        name: Target table short name.
-        source: Source table short name (a Bronze table, or another Silver
-            table for derived silver targets).
-        merge: MERGE semantics (join condition, update policy).
-        transform: Optional ``df -> df`` applied to the streaming source
-            before watermark/dedupe/stage. Pure function; must not read
-            external tables or capture the SparkSession.
-        batch_transform: Optional ``df -> df`` applied to the stage
-            DataFrame (batch) before the MERGE. Useful for last-writer-wins
-            deduplication that needs the full batch view.
-        dedupe_keys: Columns used for ``dropDuplicates`` in the streaming
-            phase. Requires ``watermark_col`` for state cleanup.
-        watermark_col: Event-time column for watermarking.
-        watermark_delay: Watermark delay (default 30 seconds).
-        ignore_changes: If True, read source with ``ignoreChanges=true``
-            (for sources that may emit updates, e.g. other Silver tables).
-            If False (default), read with ``ignoreDeletes=true``.
-        output_mode: IGNORED. Stage always uses ``append`` (requirement of
-            ``writeStream.toTable`` with Delta). Kept for backward
-            compatibility with existing specs; will be removed in a
-            follow-up cleanup.
-        build_df: Optional ``((spark, starting_version)) -> DataFrame``
-            builder for specs that need to construct the stream from
-            scratch (stream-stream joins, aggregations). When present,
-            ``source`` and ``transform`` are ignored.
-    """
-
-    name: str
-    source: str
-    merge: MergeSpec
-    transform: Callable[[DataFrame], DataFrame] | None = None
-    batch_transform: Callable[[DataFrame], DataFrame] | None = None
-    dedupe_keys: tuple[str, ...] = ()
-    watermark_col: str | None = None
-    watermark_delay: str = '30 seconds'
-    ignore_changes: bool = False
-    output_mode: str = 'update'  # ignored; kept for backward compat
-    build_df: Callable[[SparkSession, int], DataFrame] | None = None
-
-
-# ============================================================
-# Engine
-# ============================================================
 class SilverMerger:
     """Stage + batch-MERGE pipeline for the Silver layer.
 
