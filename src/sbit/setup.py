@@ -138,6 +138,7 @@ class SetupHelper:
             f"""
             CREATE TABLE IF NOT EXISTS {self.catalogue}.{self.db_name}.user_profile(
                 user_id BIGINT,
+                update_type STRING,
                 dob DATE,
                 sex STRING,
                 gender STRING,
