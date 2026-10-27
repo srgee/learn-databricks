@@ -21,11 +21,61 @@ locations (``silver_{name}``), watermark, ``dropDuplicates``, and
 """
 
 from delta.tables import DeltaTable
-from pyspark.sql import SparkSession
-from pyspark.sql.dataframe import DataFrame
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.streaming.query import StreamingQuery
+from pyspark.sql.types import StructType
 
 from sbit.specs import SilverSpec
+
+
+def _verify_schema_match(
+    spec_name: str,
+    expected_schema: StructType,
+    actual_schema: StructType,
+) -> None:
+    """Verify that an actual DataFrame schema matches the expected spec schema.
+
+    Compares field names and types, ignoring order and nullability (Delta
+    does not guarantee column order in physical tables, and nullability is
+    not strictly enforced by the merge builder).
+
+    This function exists to catch drift between the declared contract in
+    ``SilverSpec.target_schema`` and the actual output of the spec's
+    ``transform`` / ``build_df`` / ``batch_transform``. Without this check,
+    a mismatch surfaces later as a cryptic
+    ``DELTA_MERGE_UNRESOLVED_EXPRESSION`` deep inside the Delta merge
+    builder, which is hard to diagnose. With this check, the mismatch
+    surfaces here with a clear diff (missing columns, extra columns,
+    type mismatches).
+
+    Args:
+        spec_name: Name of the spec, used in the error message for diagnosis.
+        expected_schema: Schema declared in the spec's ``target_schema``.
+        actual_schema: Schema of the stage DataFrame after ``batch_transform``.
+
+    Raises:
+        RuntimeError: If field names or types differ between the two schemas.
+    """
+    expected = {f.name: f.dataType.simpleString() for f in expected_schema.fields}
+    actual = {f.name: f.dataType.simpleString() for f in actual_schema.fields}
+
+    missing = set(expected) - set(actual)
+    extra = set(actual) - set(expected)
+    type_mismatches = {
+        name: f'{expected[name]} -> {actual[name]}'
+        for name in (set(expected) & set(actual))
+        if expected[name] != actual[name]
+    }
+
+    if missing or extra or type_mismatches:
+        parts = [f'[{spec_name}] stage schema does not match target_schema:']
+        if missing:
+            parts.append(f'  missing in stage: {sorted(missing)}')
+        if extra:
+            parts.append(f'  extra in stage: {sorted(extra)}')
+        if type_mismatches:
+            parts.append(f'  type mismatches: {type_mismatches}')
+        raise RuntimeError('\n'.join(parts))
 
 
 class SilverMerger:
@@ -107,17 +157,11 @@ class SilverMerger:
         if s.batch_transform is not None:
             stage_df = s.batch_transform(stage_df)
 
-        # Sanity check: the stage table should have the same schema as the target.
-        # Catches inconsistent schema changes.
-        target_fields = set(self.spark.read.table(s.name).schema.fieldNames())
-        source_fields = set(stage_df.schema.fieldNames())
-        if target_fields != source_fields:
-            missing = source_fields - target_fields
-            extra = target_fields - source_fields
-            raise RuntimeError(
-                f'[{s.name}] schema mismatch after _ensure_target_exists: '
-                f'missing in target={missing}, extra in target={extra}'
-            )
+        # Verify that the stage schema matches the declared contract in the
+        # spec. This catches drift between transform/build_df output and
+        # target_schema before the merge builder runs, surfacing the mismatch
+        # with a clear diff instead of a cryptic DELTA_MERGE_UNRESOLVED_EXPRESSION.
+        _verify_schema_match(s.name, s.target_schema, stage_df.schema)
 
         target = DeltaTable.forName(self.spark, s.name)
         builder = target.alias('t').merge(stage_df.alias('s'), s.merge.join_on)
