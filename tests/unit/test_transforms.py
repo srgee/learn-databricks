@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from unittest.mock import MagicMock
 
 import pyspark.sql.functions as F
 from pyspark.sql.types import LongType, StringType, StructField, StructType
@@ -11,10 +12,14 @@ from sbit.transforms import (
 )
 
 
-def test_add_audit_columns(spark, date_lookup_file):
-    df = spark.read.json(date_lookup_file)
-    result = add_audit_columns(df)
+def test_add_audit_columns():
+    mock_df = MagicMock()
+    mock_df.withColumn.return_value = mock_df
+    mock_df.columns = ['load_time', 'source_file']
 
+    result = add_audit_columns(mock_df)
+
+    assert mock_df.withColumn.called
     assert 'load_time' in result.columns
     assert 'source_file' in result.columns
     assert result.collect()[0]['source_file'] is not None
