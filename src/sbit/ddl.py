@@ -26,10 +26,19 @@ class _SpecWithTargetSchema(Protocol):
     ``SilverSpec | GoldSpec``) keeps this module decoupled from the
     spec dataclasses — if a new spec type is added later, it works
     automatically as long as it has ``name`` and ``target_schema``.
+
+    Properties are declared (rather than plain attributes) to mark them
+    as read-only, which is required to satisfy frozen dataclasses like
+    ``SilverSpec``. Without this, static type checkers reject the
+    assignment because protocols default to writable attributes and
+    frozen dataclasses only expose read-only ones.
     """
 
-    name: str
-    target_schema: StructType
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def target_schema(self) -> StructType: ...
 
 
 def ddl_for_spec(spec: _SpecWithTargetSchema, catalogue: str, db: str) -> str:
