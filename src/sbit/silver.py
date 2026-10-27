@@ -156,12 +156,21 @@ class SilverMerger:
         return writer.toTable(stage_table)
 
     def _ensure_target_exists(self, s: SilverSpec) -> None:
-        """Create target table if it does not exist, with the same schema as the stage."""
+        """Create target table mirroring the stage schema.
+
+        Uses explicit DDL with backtick-quoted column names because the
+        DeltaTable builder API, CTAS, and saveAsTable all serialize to SQL
+        with unquoted identifiers on Spark Connect, causing the server-side
+        parser to drop reserved keywords (e.g. ``time``) and rename tokens
+        that collide with the target table name (e.g. ``heartrate`` →
+        ``heart_rate``). Backticks force the parser to treat each name as
+        a strict identifier, bypassing both classes of corruption.
+        """
+        if self.spark.catalog.tableExists(s.name):
+            return
         stage_schema = self.spark.read.table(self._stage_name(s.name)).schema
-        builder = DeltaTable.createIfNotExists(self.spark).tableName(s.name)
-        for field in stage_schema.fields:
-            builder = builder.addColumn(field.name, field.dataType)
-        builder.execute()
+        cols_ddl = ', '.join(f'`{f.name}` {f.dataType.simpleString()}' for f in stage_schema.fields)
+        self.spark.sql(f'CREATE TABLE IF NOT EXISTS {s.name} ({cols_ddl}) USING DELTA')
 
     def _merge_stage_to_target(self, s: SilverSpec) -> None:
         """MERGE batch stage with target table (native DeltaTable API)."""
@@ -190,12 +199,12 @@ class SilverMerger:
             update_set = s.merge.update_set
             condition = s.merge.update_condition
             if update_set is None:
-                # UPDATE SET * (todas las columnas del source)
+                # UPDATE SET *
                 builder = (
                     builder.whenMatchedUpdateAll(condition=condition) if condition else builder.whenMatchedUpdateAll()
                 )
             else:
-                # UPDATE SET específico (dict de {col: expr})
+                # Narrow UPDATE
                 builder = (
                     builder.whenMatchedUpdate(condition=condition, set=update_set)
                     if condition
