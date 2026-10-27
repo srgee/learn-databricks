@@ -6,10 +6,11 @@ from databricks.connect.session import DatabricksSession
 from sbit.bronze import BronzeIngester
 from sbit.bronze_specs import FEEDS
 from sbit.config import load_settings
+from sbit.gold import GoldBuilder
 from sbit.gold_specs import GOLD_PHASES, GOLD_STREAMS
 from sbit.io import build_object_path
+from sbit.silver import SilverMerger
 from sbit.silver_specs import SILVER_PHASES, SILVER_STREAMS
-from sbit.streaming import UpsertPipeline
 
 
 def main():
@@ -37,7 +38,7 @@ def main():
             checkpoint_root = build_object_path(
                 config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/silver'
             )
-            UpsertPipeline(spark, checkpoint_root, starting_version=config.starting_version).run(
+            SilverMerger(spark, checkpoint_root, starting_version=config.starting_version).run(
                 SILVER_STREAMS, SILVER_PHASES, once=once
             )
         elif config.layer == 'gold':
@@ -45,7 +46,7 @@ def main():
             checkpoint_root = build_object_path(
                 config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/gold'
             )
-            UpsertPipeline(spark, checkpoint_root, starting_version=config.starting_version).run(
+            GoldBuilder(spark, checkpoint_root, starting_version=config.starting_version).run(
                 GOLD_STREAMS, GOLD_PHASES, once=once
             )
         elif config.layer == 'all':
@@ -62,7 +63,7 @@ def main():
             checkpoint_root = build_object_path(
                 config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/silver'
             )
-            UpsertPipeline(spark, checkpoint_root, starting_version=config.starting_version).run(
+            SilverMerger(spark, checkpoint_root, starting_version=config.starting_version).run(
                 SILVER_STREAMS, SILVER_PHASES, once=once
             )
             print('Done!')
@@ -70,7 +71,7 @@ def main():
             checkpoint_root = build_object_path(
                 config.catalogue_name, config.db_name, config.volume_name, config.base_checkpoint_path, '/gold'
             )
-            UpsertPipeline(spark, checkpoint_root, starting_version=config.starting_version).run(
+            GoldBuilder(spark, checkpoint_root, starting_version=config.starting_version).run(
                 GOLD_STREAMS, GOLD_PHASES, once=once
             )
             print('Done!')
