@@ -7,8 +7,10 @@ from databricks.connect.session import DatabricksSession
 from databricks.sdk import WorkspaceClient
 
 from sbit.config import load_settings
+from sbit.ddl import ddl_for_spec
 from sbit.history_loader import load_history
 from sbit.io import build_object_path
+from sbit.silver_specs import SILVER_STREAMS
 
 
 class SetupHelper:
@@ -98,6 +100,26 @@ class SetupHelper:
                 PARTITIONED BY (topic, week_part)
             """
         )
+        print('Done!')
+
+    def create_silver_tables(self) -> None:
+        """Create all silver target tables by deriving DDLs from SilverSpec.target_schema.
+
+        Each spec's target_schema is converted to backtick-quoted DDL via
+        ddl_for_spec(). This is the single source of truth for silver
+        schemas: changing a spec's target_schema automatically updates the
+        physical table definition on the next setup_db() call.
+
+        Bronze tables are NOT included here — their schemas are dictated
+        by the raw landing format (CSV/JSON DDL strings in bronze_specs),
+        not by a transform contract.
+        """
+        if not self.initialized:
+            raise KeyError('Missing configuration settings')
+        print('Creating silver tables from specs... ', end='')
+        for spec in SILVER_STREAMS.values():
+            ddl = ddl_for_spec(spec, self.catalogue, self.db_name)
+            self.spark.sql(ddl)
         print('Done!')
 
     def create_users_table(self) -> None:
