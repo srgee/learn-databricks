@@ -1,7 +1,7 @@
 import pytest
 
+from sbit.gold import GoldSpec
 from sbit.gold_specs import GOLD_PHASES, GOLD_STREAMS
-from sbit.streaming import StreamSpec
 from sbit.upserters import MergeSpec
 
 
@@ -10,7 +10,7 @@ def test_gold_streams_are_defined():
 
 
 @pytest.mark.parametrize('stream_name, spec', GOLD_STREAMS.items())
-def test_stream_spec_structure(stream_name: str, spec: StreamSpec):
+def test_stream_spec_structure(stream_name: str, spec: GoldSpec):
     assert spec.name == stream_name
     assert isinstance(spec.source, str) and spec.source
     assert isinstance(spec.merge, MergeSpec)
