@@ -2,8 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from delta._typing import ColumnMapping
-from delta.tables import DeltaTable
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
@@ -15,33 +14,6 @@ class MergeSpec:
     update: bool = False  # when matched (and cond) then update
     update_condition: str | None = None
     update_set: ColumnMapping | None = None  # None means all cols (set *)
-
-
-def merge_batch(
-    spark: SparkSession,
-    target_table: str,
-    spec: MergeSpec,
-    batch_transform: Callable[[DataFrame], DataFrame] | None = None,
-) -> Callable:
-    """Return the callable for a batch merge (micro-batch)."""
-
-    def _upsert(batch_df: DataFrame, batch_id: int) -> None:
-        if batch_transform is not None:
-            batch_df = batch_transform(batch_df)  # dedupe CDC por micro-batch
-        builder = (
-            DeltaTable.forName(spark, target_table).alias('t').merge(source=batch_df.alias('s'), condition=spec.join_on)
-        )
-        if spec.update:
-            builder = (
-                builder.whenMatchedUpdate(set=spec.update_set, condition=spec.update_condition)
-                if spec.update_set
-                else builder.whenMatchedUpdateAll(condition=spec.update_condition)
-            )
-        if spec.insert:
-            builder = builder.whenNotMatchedInsertAll()
-        builder.execute()
-
-    return _upsert
 
 
 def dedup_latest(id_col: str, order_col: str) -> Callable:
