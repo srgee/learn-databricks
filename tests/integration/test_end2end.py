@@ -3,8 +3,7 @@ from pathlib import Path
 from _helpers import DataProducer
 from pyspark.sql import SparkSession
 
-from sbit.bronze import BronzeIngester
-from sbit.bronze_specs import FEEDS
+from sbit.bronze import FEEDS, BronzeIngester
 from sbit.config import Config
 from sbit.gold import GoldBuilder
 from sbit.gold_specs import GOLD_PHASES, GOLD_STREAMS

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from delta._typing import ColumnMapping
 from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql.types import StructType
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class SilverSpec:
     name: str
     source: str
     merge: MergeSpec
+    target_schema: StructType  # NEW: explicit schema contract for the target table
     transform: Callable[[DataFrame], DataFrame] | None = None
     batch_transform: Callable[[DataFrame], DataFrame] | None = None
     dedupe_keys: tuple[str, ...] = ()

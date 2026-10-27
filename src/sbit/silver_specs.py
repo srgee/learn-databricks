@@ -1,5 +1,16 @@
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.types import (
+    BooleanType,
+    DateType,
+    DoubleType,
+    IntegerType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
 
 from sbit.specs import MergeSpec, SilverSpec
 from sbit.transforms import calculate_age_bins, parse_kafka_topic
@@ -100,6 +111,14 @@ SILVER_STREAMS = {
     'users': SilverSpec(
         name='users',
         source='registered_users_bz',
+        target_schema=StructType(
+            [
+                StructField('user_id', LongType(), True),
+                StructField('device_id', LongType(), True),
+                StructField('mac_address', StringType(), True),
+                StructField('registration_timestamp', TimestampType(), True),
+            ]
+        ),
         transform=lambda df: df.selectExpr(
             'user_id', 'device_id', 'mac_address', 'cast(registration_timestamp as timestamp)'
         ),
@@ -110,6 +129,14 @@ SILVER_STREAMS = {
     'gym_logs': SilverSpec(
         name='gym_logs',
         source='gym_logins_bz',
+        target_schema=StructType(
+            [
+                StructField('mac_address', StringType(), True),
+                StructField('gym', LongType(), True),  # era bigint en DDL
+                StructField('login', TimestampType(), True),
+                StructField('logout', TimestampType(), True),
+            ]
+        ),
         transform=lambda df: df.selectExpr(
             'mac_address', 'gym', 'cast(login as timestamp)', 'cast(logout as timestamp)'
         ),
@@ -125,6 +152,22 @@ SILVER_STREAMS = {
     'user_profile': SilverSpec(
         name='user_profile',
         source='kafka_multiplex_bz',
+        target_schema=StructType(
+            [
+                StructField('user_id', LongType(), True),
+                StructField('update_type', StringType(), True),
+                StructField('updated', TimestampType(), True),
+                StructField('dob', DateType(), True),
+                StructField('sex', StringType(), True),
+                StructField('gender', StringType(), True),
+                StructField('first_name', StringType(), True),
+                StructField('last_name', StringType(), True),
+                StructField('street_address', StringType(), True),
+                StructField('city', StringType(), True),
+                StructField('state', StringType(), True),
+                StructField('zip', IntegerType(), True),
+            ]
+        ),
         transform=lambda df: parse_kafka_topic(
             'user_info',
             """
@@ -153,6 +196,15 @@ SILVER_STREAMS = {
     'workouts': SilverSpec(
         name='workouts',
         source='kafka_multiplex_bz',
+        target_schema=StructType(
+            [
+                StructField('user_id', IntegerType(), True),
+                StructField('workout_id', IntegerType(), True),
+                StructField('time', TimestampType(), True),
+                StructField('action', StringType(), True),
+                StructField('session_id', IntegerType(), True),
+            ]
+        ),
         transform=lambda df: parse_kafka_topic(
             'workout', 'user_id INT, workout_id INT, timestamp FLOAT, action STRING, session_id INT'
         )(df).select(
@@ -165,6 +217,14 @@ SILVER_STREAMS = {
     'heart_rate': SilverSpec(
         name='heart_rate',
         source='kafka_multiplex_bz',
+        target_schema=StructType(
+            [
+                StructField('device_id', LongType(), True),
+                StructField('time', TimestampType(), True),
+                StructField('heartrate', DoubleType(), True),
+                StructField('valid', BooleanType(), True),
+            ]
+        ),
         transform=lambda df: parse_kafka_topic('bpm', 'device_id LONG, time TIMESTAMP, heartrate DOUBLE')(
             df
         ).withColumn('valid', F.when(F.col('heartrate') <= 0, False).otherwise(True)),
@@ -176,6 +236,15 @@ SILVER_STREAMS = {
         name='user_bins',
         source='user_profile',
         ignore_changes=True,
+        target_schema=StructType(
+            [
+                StructField('user_id', LongType(), True),
+                StructField('age', StringType(), True),
+                StructField('gender', StringType(), True),
+                StructField('city', StringType(), True),
+                StructField('state', StringType(), True),
+            ]
+        ),
         transform=lambda df: df.join(
             df.sparkSession.table('users').select('user_id').distinct(), 'user_id', 'left'
         ).select('user_id', calculate_age_bins(F.col('dob')), 'gender', 'city', 'state'),
@@ -185,6 +254,15 @@ SILVER_STREAMS = {
         name='completed_workouts',
         source='workouts',
         build_df=build_completed_workouts,
+        target_schema=StructType(
+            [
+                StructField('user_id', IntegerType(), True),
+                StructField('workout_id', IntegerType(), True),
+                StructField('session_id', IntegerType(), True),
+                StructField('start_time', TimestampType(), True),
+                StructField('end_time', TimestampType(), True),
+            ]
+        ),
         output_mode='append',
         merge=MergeSpec(
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id AND t.session_id = s.session_id'
@@ -194,6 +272,17 @@ SILVER_STREAMS = {
         name='workout_bpm',
         source='completed_workouts',
         build_df=build_workout_bpm,
+        target_schema=StructType(
+            [
+                StructField('user_id', IntegerType(), True),
+                StructField('workout_id', IntegerType(), True),
+                StructField('session_id', IntegerType(), True),
+                StructField('start_time', TimestampType(), True),
+                StructField('end_time', TimestampType(), True),
+                StructField('time', TimestampType(), True),
+                StructField('heartrate', DoubleType(), True),
+            ]
+        ),
         output_mode='append',
         merge=MergeSpec(
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id '
