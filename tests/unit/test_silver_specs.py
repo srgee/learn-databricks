@@ -1,7 +1,7 @@
 import pytest
 
-from sbit.silver_specs import PHASES, SILVER_STREAMS
-from sbit.streaming import StreamSpec
+from sbit.silver import SilverSpec
+from sbit.silver_specs import SILVER_PHASES, SILVER_STREAMS
 from sbit.upserters import MergeSpec
 
 
@@ -10,7 +10,7 @@ def test_silver_streams_are_defined():
 
 
 @pytest.mark.parametrize('stream_name, spec', SILVER_STREAMS.items())
-def test_stream_spec_structure(stream_name: str, spec: StreamSpec):
+def test_stream_spec_structure(stream_name: str, spec: SilverSpec):
     assert spec.name == stream_name
     assert isinstance(spec.source, str) and spec.source
     assert isinstance(spec.merge, MergeSpec)
@@ -19,7 +19,7 @@ def test_stream_spec_structure(stream_name: str, spec: StreamSpec):
 
 def test_phases_coverage():
     all_stream_keys = set(SILVER_STREAMS.keys())
-    phased_streams = [stream for phase in PHASES for stream in phase]
+    phased_streams = [stream for phase in SILVER_PHASES for stream in phase]
 
     # Check that all streams in phases exist in definitions
     for stream in phased_streams:
