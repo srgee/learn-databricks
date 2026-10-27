@@ -66,3 +66,37 @@ class SilverSpec:
     ignore_changes: bool = False
     output_mode: str = 'update'  # ignored; kept for backward compat
     build_df: Callable[[SparkSession, int], DataFrame] | None = None
+
+
+@dataclass(frozen=True)
+class GoldSpec:
+    """Specification for a Gold target.
+
+    Gold targets are immutable aggregates built from Silver sources.
+    The spec is intentionally minimal: 4 fields, no optional transforms
+    or watermarks. If a Gold target needs source-side transformation,
+    that logic belongs inside ``build_df``.
+
+    Attributes:
+        name: Target table short name.
+        source: Source table short name (a Silver table). Kept for
+            documentation and traceability; ``build_df`` is responsible
+            for actually reading it.
+        target_schema: Explicit schema contract for the target table.
+            Declared as a StructType so the DDL can be derived by
+            ``ddl_for_spec`` and validated against ``build_df`` output
+            by ``GoldBuilder._merge_stage_to_target`` (Commit 6).
+        build_df: ``((spark, starting_version)) -> DataFrame`` builder
+            that constructs the streaming DataFrame from scratch.
+            Typically involves stream-stream joins or aggregations.
+        merge: MERGE semantics. Gold MERGEs are insert-only by design;
+            the ``update`` flag of ``MergeSpec`` is honored if set, but
+            the engine's merge logic does not include the update branch
+            (it falls back to insert-only behavior).
+    """
+
+    name: str
+    source: str
+    target_schema: StructType
+    build_df: Callable[[SparkSession, int], DataFrame]
+    merge: MergeSpec

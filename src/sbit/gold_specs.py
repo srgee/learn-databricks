@@ -1,8 +1,8 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.types import DoubleType, IntegerType, LongType, StringType, StructField, StructType
 
-from sbit.gold import GoldSpec
-from sbit.specs import MergeSpec
+from sbit.specs import GoldSpec, MergeSpec
 
 
 def build_workout_bpm_summary(spark: SparkSession, starting_version: int):
@@ -41,7 +41,22 @@ GOLD_STREAMS: dict[str, GoldSpec] = {
         name='workout_bpm_summary',
         source='workout_bpm',
         build_df=build_workout_bpm_summary,  # not following the pattern aggregation + static join
-        # Idempotent: completed session doe snot change → MERGE insert-only
+        target_schema=StructType(
+            [
+                StructField('workout_id', IntegerType(), True),
+                StructField('session_id', IntegerType(), True),
+                StructField('user_id', LongType(), True),
+                StructField('age', StringType(), True),
+                StructField('gender', StringType(), True),
+                StructField('city', StringType(), True),
+                StructField('state', StringType(), True),
+                StructField('min_bpm', DoubleType(), True),
+                StructField('avg_bpm', DoubleType(), True),
+                StructField('max_bpm', DoubleType(), True),
+                StructField('num_recordings', LongType(), True),
+            ]
+        ),
+        # Idempotent: completed session does not change → MERGE insert-only
         merge=MergeSpec(
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id AND t.session_id = s.session_id'
         ),
