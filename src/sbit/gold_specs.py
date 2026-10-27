@@ -13,10 +13,10 @@ def build_workout_bpm_summary(spark: SparkSession, starting_version: int):
         .withWatermark('end_time', '30 seconds')
         .groupBy('user_id', 'workout_id', 'session_id', 'end_time')
         .agg(
-            F.min('heart_rate').alias('min_bpm'),
-            F.mean('heart_rate').alias('avg_bpm'),
-            F.max('heart_rate').alias('max_bpm'),
-            F.count('heart_rate').alias('num_recordings'),
+            F.min('heartrate').alias('min_bpm'),
+            F.mean('heartrate').alias('avg_bpm'),
+            F.max('heartrate').alias('max_bpm'),
+            F.count('heartrate').alias('num_recordings'),
         )
     )
 
