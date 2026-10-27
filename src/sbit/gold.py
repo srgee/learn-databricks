@@ -121,17 +121,6 @@ class GoldBuilder:
         return writer.toTable(stage_table)
 
     # ---------- Fase 2: batch MERGE stage → target ----------
-
-    def _ensure_target_exists(self, s: GoldSpec) -> None:
-        """Create target table with the stage schema if it does not exist."""
-        self.spark.sql(
-            f"""
-            CREATE TABLE IF NOT EXISTS {s.name}
-            USING DELTA
-            AS SELECT * FROM {self._stage_name(s.name)} WHERE 1=0
-            """
-        )
-
     def _merge_stage_to_target(self, s: GoldSpec) -> None:
         """Insert-only MERGE stage → target (native DeltaTable API).
 
@@ -141,10 +130,8 @@ class GoldBuilder:
         needing an update branch.
         """
         stage_df = self.spark.read.table(self._stage_name(s.name))
-        self._ensure_target_exists(s)
-
         target = DeltaTable.forName(self.spark, s.name)
-        (target.alias('t').merge(stage_df.alias('s'), s.merge.join_on).whenNotMatchedInsertAll().execute())
+        target.alias('t').merge(stage_df.alias('s'), s.merge.join_on).whenNotMatchedInsertAll().execute()
 
     def _drop_stage(self, s: GoldSpec) -> None:
         self.spark.sql(f'DROP TABLE IF EXISTS {self._stage_name(s.name)}')
