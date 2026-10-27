@@ -16,7 +16,6 @@ def build_completed_workouts(spark: SparkSession, starting_version: int) -> Data
 
     Args:
         spark: The active SparkSession instance.
-        src: Source table name.
         starting_version: The starting version for the CDC stream reader.
 
     Returns:
@@ -126,12 +125,25 @@ SILVER_STREAMS = {
     'user_profile': StreamSpec(
         name='user_profile',
         source='kafka_multiplex_bz',
-        transform=parse_kafka_topic(
+        transform=lambda df: parse_kafka_topic(
             'user_info',
             """
             user_id bigint, update_type STRING, timestamp FLOAT,
             dob STRING, sex STRING, gender STRING, first_name STRING, last_name STRING,
             address STRUCT<street_address: STRING, city: STRING, state: STRING, zip: INT>""",
+        )(df).select(
+            'user_id',
+            'update_type',
+            F.col('timestamp').cast('timestamp').alias('updated'),
+            F.to_date(F.col('dob'), 'MM/dd/yyyy').alias('dob'),
+            'sex',
+            'gender',
+            'first_name',
+            'last_name',
+            F.col('address.street_address').alias('street_address'),
+            F.col('address.city').alias('city'),
+            F.col('address.state').alias('state'),
+            F.col('address.zip').alias('zip'),
         ),
         batch_transform=dedup_latest('user_id', 'updated'),
         merge=MergeSpec(join_on='t.user_id = s.user_id', update=True, update_condition='t.updated < s.updated'),
@@ -153,25 +165,19 @@ SILVER_STREAMS = {
     'heart_rate': StreamSpec(
         name='heart_rate',
         source='kafka_multiplex_bz',
-        transform=lambda df: (
-            parse_kafka_topic('bpm', 'device_id LONG, time TIMESTAMP, heartrate DOUBLE')(df).select(
-                'v.*' if False else '*', F.when(F.col('heartrate') <= 0, False).otherwise(True).alias('valid')
-            )
-            if False
-            else parse_kafka_topic('bpm', 'device_id LONG, time TIMESTAMP, heartrate DOUBLE')(df).withColumn(
-                'valid', F.when(F.col('heartrate') <= 0, False).otherwise(True)
-            )
-        ),
+        transform=lambda df: parse_kafka_topic('bpm', 'device_id LONG, time TIMESTAMP, heartrate DOUBLE')(
+            df
+        ).withColumn('valid', F.when(F.col('heartrate') <= 0, False).otherwise(True)),
         merge=MergeSpec(join_on='t.device_id = s.device_id AND t.time = s.time'),
         dedupe_keys=('device_id', 'time'),
         watermark_col='time',
     ),
-    'user_bins': StreamSpec(  # SCD Type 1; read silver => ignoreChanges; no watermark (static join)
+    'user_bins': StreamSpec(
         name='user_bins',
         source='user_profile',
         ignore_changes=True,
         transform=lambda df: df.join(
-            df.sparkSession.table('user_bins_src_users').select('user_id'), 'user_id', 'left'
+            df.sparkSession.table('users').select('user_id').distinct(), 'user_id', 'left'
         ).select('user_id', calculate_age_bins(F.col('dob')), 'gender', 'city', 'state'),
         merge=MergeSpec(join_on='t.user_id = s.user_id', update=True),
     ),
