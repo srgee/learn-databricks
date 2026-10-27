@@ -156,14 +156,10 @@ class SilverMerger:
         return writer.toTable(stage_table)
 
     def _ensure_target_exists(self, s: SilverSpec) -> None:
-        """Create target table if it does not exist."""
-        self.spark.sql(
-            f"""
-            CREATE TABLE IF NOT EXISTS {s.name}
-            USING DELTA
-            AS SELECT * FROM {self._stage_name(s.name)} WHERE 1=0
-            """
-        )
+        """Create target table if it does not exist, with the same schema as the stage."""
+        if self.spark.catalog.tableExists(s.name):
+            return
+        self.spark.read.table(self._stage_name(s.name)).limit(0).write.format('delta').saveAsTable(s.name)
 
     def _merge_stage_to_target(self, s: SilverSpec) -> None:
         """MERGE batch stage with target table (native DeltaTable API)."""
@@ -214,12 +210,3 @@ class SilverMerger:
             for name in phase:
                 self._merge_stage_to_target(specs[name])
                 self._drop_stage(specs[name])
-
-
-# ============================================================
-# Alias temporal para compatibilidad retroactiva
-# ============================================================
-# Permite que el test y cualquier código existente sigan usando
-# `UpsertPipeline` mientras se completa la migración a la arquitectura
-# de tres engines (Bronze / Silver / Gold). Eliminar en el paso 4.
-UpsertPipeline = SilverMerger
