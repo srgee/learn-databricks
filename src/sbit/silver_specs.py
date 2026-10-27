@@ -2,7 +2,6 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from sbit.silver import SilverSpec
-from sbit.streaming import SilverSpec
 from sbit.transforms import calculate_age_bins, parse_kafka_topic
 from sbit.upserters import MergeSpec, dedup_latest
 
