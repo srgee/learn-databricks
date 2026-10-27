@@ -161,6 +161,7 @@ class SetupHelper:
             f"""
             CREATE TABLE IF NOT EXISTS {self.catalogue}.{self.db_name}.heart_rate(
                 device_id LONG,
+                time TIMESTAMP,
                 heart_rate DOUBLE,
                 valid BOOLEAN
             )"""
