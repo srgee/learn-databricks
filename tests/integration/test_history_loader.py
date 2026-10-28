@@ -1,6 +1,8 @@
 from pyspark.sql import SparkSession
+
 from wearpipe.config import Config
 from wearpipe.history_loader import _transform_date_lookup, load_history
+from wearpipe.setup import SetupHelper
 
 
 def test_transform_date_lookup(spark: SparkSession):
@@ -24,13 +26,19 @@ def test_transform_date_lookup(spark: SparkSession):
 
 
 def test_end_to_end_load_history(spark: SparkSession, config: Config):
-    # Ruta construida a partir de la configuración o la ruta preexistente en Databricks
-    file_path = f'/Volumes/{config.catalogue_name}/{config.db_name}/{config.volume_name}/{config.base_data_path}/date-lookup.json'  # noqa: E501
+    try:
+        setup = SetupHelper(spark, config.catalogue_name, config.db_name, config.volume_name, config.base_data_path)
+        setup.setup_db()
+        setup.setup_volume()
+        setup.create_date_lookup_table()
+        file_path = setup.upload_date_lookup_file()
 
-    # Ejecutar carga histórica directamente
-    load_history(spark, file_path)
+        load_history(spark, file_path)
 
-    # Validaciones en destino
-    table_name = 'date_lookup'
-    assert spark.catalog.tableExists(table_name)
-    assert spark.read.table(table_name).count() > 0
+        table_name = 'date_lookup'
+        assert spark.catalog.tableExists(table_name)
+        assert spark.read.table(table_name).count() > 0
+
+    finally:
+        setup.cleanup_volume()
+        setup.cleanup_db()
