@@ -24,22 +24,6 @@ class MergeSpec:
 
 @dataclass(frozen=True)
 class SilverSpec:
-    """'''''
-    watermark_col: Event-time column for watermarking.
-    watermark_delay: Watermark delay (default 30 seconds).
-    ignore_changes: If True, read source with ``ignoreChanges=true``
-        (for sources that may emit updates, e.g. other Silver tables).
-        If False (default), read with ``ignoreDeletes=true``.
-    output_mode: IGNORED. Stage always uses ``append`` (requirement of
-        ``writeStream.toTable`` with Delta). Kept for backward
-        compatibility with existing specs; will be removed in a
-        follow-up cleanup.
-    build_df: Optional ``((spark, starting_version)) -> DataFrame``
-        builder for specs that need to construct the stream from
-        scratch (stream-stream joins, aggregations). When present,
-        ``source`` and ``transform`` are ignored.
-    """
-
     name: str  # Short name for target table
     source: str  # Source table short name (a Bronze table, or another Silver table)
     merge: MergeSpec  # MERGE semantics (join condition, update policy)
@@ -55,7 +39,6 @@ class SilverSpec:
     ] = ()  # Columns used for dropDuplicates in the streaming phase. Requires watermark_col for state cleanup
     watermark_col: str | None = None  # Event-time column for watermarking
     watermark_delay: str = '30 seconds'
-    output_mode: str = 'update'  # ignored; kept for backward compat
 
     # If True, read source with ignoreChanges=true (for sources that may emit updates).
     # If False, read with ignoreDeletes=true.

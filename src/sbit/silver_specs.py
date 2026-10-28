@@ -263,7 +263,6 @@ SILVER_STREAMS = {
                 StructField('end_time', TimestampType(), True),
             ]
         ),
-        output_mode='append',
         merge=MergeSpec(
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id AND t.session_id = s.session_id'
         ),
@@ -283,7 +282,6 @@ SILVER_STREAMS = {
                 StructField('heartrate', DoubleType(), True),
             ]
         ),
-        output_mode='append',
         merge=MergeSpec(
             join_on='t.user_id = s.user_id AND t.workout_id = s.workout_id '
             'AND t.session_id = s.session_id AND t.time = s.time'
