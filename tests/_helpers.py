@@ -3,7 +3,9 @@ from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import SparkSession
+
 from wearpipe.config import Config
+from wearpipe.io import build_object_path
 
 
 @dataclass(frozen=True)
@@ -46,8 +48,11 @@ class DataProducer:
     ) -> None:
         self.spark = spark
         self.config = config
-        self.landing_zone_path = (
-            f'/Volumes/{config.catalogue_name}/{config.db_name}/{config.volume_name}/{config.base_data_path}'
+        self.landing_zone_path = build_object_path(
+            config.catalogue_name,
+            config.db_name,
+            config.volume_name,
+            config.base_data_path,
         )
         self.local_data_root = local_data_root
         self._workspace_client = workspace_client
