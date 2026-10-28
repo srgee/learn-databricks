@@ -2,6 +2,7 @@ from pathlib import Path
 
 from _helpers import DataProducer
 from pyspark.sql import SparkSession
+
 from wearpipe.bronze import FEEDS, BronzeIngester
 from wearpipe.config import Config
 from wearpipe.gold import GoldBuilder
@@ -137,8 +138,8 @@ def test_batch(spark: SparkSession, config: Config):
         g_pipeline.run(GOLD_STREAMS, GOLD_PHASES, once=True)
 
         table_fqn = f'{config.catalogue_name}.{config.db_name}.gym_summary'
-        actual_rows = spark.table(table_fqn).count()
-        assert actual_rows == 8
+        actual_count = spark.table(table_fqn).count()
+        assert actual_count == 8
 
         print('Done!')
 
@@ -217,11 +218,12 @@ def test_batch(spark: SparkSession, config: Config):
         g_pipeline.run(GOLD_STREAMS, GOLD_PHASES, once=True)
 
         table_fqn = f'{config.catalogue_name}.{config.db_name}.gym_summary'
-        actual_rows = spark.table(table_fqn).collect()
-        assert actual_rows == 16
+        actual_count = spark.table(table_fqn).count()
+        assert actual_count == 16
 
         table_fqn = f'{config.catalogue_name}.{config.db_name}.workout_bpm_summary'
-        assert actual_rows == 2
+        actual_count = spark.table(table_fqn).count()
+        assert actual_count == 2
 
         print('Done!')
 

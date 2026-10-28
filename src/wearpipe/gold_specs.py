@@ -1,6 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType, IntegerType, LongType, StringType, StructField, StructType
+
 from wearpipe.specs import GoldSpec, MergeSpec
 
 
@@ -39,12 +40,12 @@ GOLD_STREAMS: dict[str, GoldSpec] = {
     'workout_bpm_summary': GoldSpec(
         name='workout_bpm_summary',
         source='workout_bpm',
-        build_df=build_workout_bpm_summary,  # not following the pattern aggregation + static join
+        build_df=build_workout_bpm_summary,  # Not following the pattern aggregation + static join
         target_schema=StructType(
             [
                 StructField('workout_id', IntegerType(), True),
                 StructField('session_id', IntegerType(), True),
-                StructField('user_id', LongType(), True),
+                StructField('user_id', IntegerType(), True),
                 StructField('age', StringType(), True),
                 StructField('gender', StringType(), True),
                 StructField('city', StringType(), True),
