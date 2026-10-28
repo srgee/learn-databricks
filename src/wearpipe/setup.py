@@ -20,6 +20,7 @@ from typing import Any
 
 from databricks.connect.session import DatabricksSession
 from databricks.sdk import WorkspaceClient
+
 from wearpipe.config import load_settings
 from wearpipe.ddl import ddl_for_spec
 from wearpipe.gold_specs import GOLD_STREAMS

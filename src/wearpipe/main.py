@@ -2,6 +2,7 @@ import sys
 import time
 
 from databricks.connect.session import DatabricksSession
+
 from wearpipe.bronze import FEEDS, BronzeIngester
 from wearpipe.config import load_settings
 from wearpipe.gold import GoldBuilder

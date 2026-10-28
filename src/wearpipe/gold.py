@@ -21,7 +21,8 @@ from delta.tables import DeltaTable
 from pyspark.sql import SparkSession
 from pyspark.sql.streaming.query import StreamingQuery
 from pyspark.sql.types import StructType
-from wearpipe.specs import GoldSpec  # import temporal hasta mover MergeSpec a un módulo común
+
+from wearpipe.specs import GoldSpec
 
 
 def _verify_schema_match(
@@ -53,15 +54,7 @@ def _verify_schema_match(
 
 
 class GoldBuilder:
-    """Stage + batch-MERGE pipeline for the Gold layer.
-
-    Args:
-        spark: Active SparkSession.
-        checkpoint_root: UC volume path where stream offsets are persisted
-            (e.g. ``/Volumes/cat/db/vol/checkpoint_zone``).
-        starting_version: Delta log version to start streaming from
-            (``0`` = from table creation). Passed to ``build_df``.
-    """
+    """Stage + batch-MERGE pipeline for the Gold layer."""
 
     def __init__(
         self,
