@@ -13,8 +13,7 @@ from pyspark.sql.types import (
 )
 
 from wearpipe.specs import MergeSpec, SilverSpec
-from wearpipe.transforms import calculate_age_bins, parse_kafka_topic
-from wearpipe.upserters import dedup_latest
+from wearpipe.transforms import calculate_age_bins, dedup_latest, parse_kafka_topic
 
 
 def _get_cdc_options(starting_version: int, ignore_changes: bool = False) -> dict:
