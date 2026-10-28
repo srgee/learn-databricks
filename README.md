@@ -1,5 +1,5 @@
 
-# Werable Data Processor over DataLakehouse
+# Wearable Data Processor over DataLakehouse
 
 An end-to-end streaming medallion pipeline (Bronze → Silver → Gold) that ingests IoT and application data from a fictional gym chain (user registrations, gym check-ins, and a Kafka event stream user profiles, workouts, heart-rate telemetry).
 
@@ -7,29 +7,89 @@ Built to run entirely on Databricks Free Edition through Databricks Connect (Pyt
 
 No paid Databricks account is required. Every design decision in this repo (path formats, checkpoint locations, schema handling) accounts for the constraints of the free tier instead of fighting them.
 
-# What will you learn?
+## What will you learn?
 
+- Streaming structured data processing
 - Real architecture, toy-sized data. The full medallion pattern (Auto Loader,CDC streaming, MERGE upserts, streaming aggregations) on a dataset small enough to reprocess in seconds.
 - Production-shaped repository. Packaging (Python wheel), Asset Bundles,configuration with a documented priority chain, and tests. The engineering practices that tutorials usually skip.
 - Every layer is observable. With Unity Catalog you can watch raw files become bronze tables, then curated silver entities, then gold aggregates. All fromCatalog Explorer.
-- Documented failure modes. The compatibility playbookbelow records real errors hit while building this, so you learn why the rulesexist, not just the rules.
+- Documented failure modes. The compatibility playbookbelow records real errors hit while building this, so you learn why the rules exist, not just the rules.
 
-# Engineering highlights
 
-- **Specs vs. engines.** `SourceFeed` / `StreamSpec` dataclasses describe *what* flows; the two engines define *how*. Custom `build_df` builders cover the irregular cases (stream–stream joins, aggregations).
-- **One source of configuration truth.** A frozen `Settings` dataclass declares each setting once (flag, env var, default); the CLI parser is generated from it. Resolution order: CLI > environment > `.env` > defaults.
+## Architecture
+
+The project implements a three-layer medallion architecture. Each layer has a specific contract and is orchestrated through declarative specs.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#ffffff', 'primaryTextColor': '#333333', 'primaryBorderColor': '#333333', 'lineColor': '#333333'}}}%%
+flowchart LR
+    CSV[(CSV Files)]
+    JSON[(JSON Files)]
+    BZ_ING[BronzeIngester]
+    BZ_TBL[(Bronze Tables)]
+    SL_ING[SilverMerger]
+    SL_STG[(silver_stage)]
+    SL_TBL[(Silver Tables)]
+    GD_ING[GoldBuilder]
+    GD_STG[(gold_stage)]
+    GD_TBL[(Gold Tables)]
+
+    CSV --> BZ_ING
+    JSON --> BZ_ING
+    BZ_ING --> BZ_TBL
+    BZ_TBL --> SL_ING
+    SL_ING -->|1. writeStream| SL_STG
+    SL_ING -->|2. batch MERGE| SL_TBL
+    SL_TBL --> GD_ING
+    GD_ING -->|1. writeStream| GD_STG
+    GD_ING -->|2. batch MERGE| GD_TBL
+
+    classDef engine fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef storage fill:#fff3e0,stroke:#e65100,stroke-width:1px
+    classDef source fill:#f3e5f5,stroke:#6a1b9a,stroke-width:1px
+
+    class CSV,JSON source
+    class BZ_ING,SL_ING,GD_ING engine
+    class BZ_TBL,SL_STG,SL_TBL,GD_STG,GD_TBL storage
+```
+
+Due to Databricks' serverless compute limitations with `foreachBatch`, the project uses a stage-and-merge pattern for Silver and Gold layers. Streams write to an ephemeral `{name}_stage` Delta table, which is then batch-merged into the final target.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#ffffff', 'primaryTextColor': '#333333', 'primaryBorderColor': '#333333', 'lineColor': '#333333'}}}%%
+sequenceDiagram
+    participant Stream as readStream
+    participant Stage as _stage Table
+    participant Target as Target Table
+    participant Engine as Pipeline Engine
+
+    Engine->>Stream: Start stream (once=True)
+    Stream->>Stage: writeStream.toTable(stage)
+    Note over Stream,Stage: AvailableNow trigger drains<br/>all pending data
+    Stream->>Engine: awaitTermination()
+    Engine->>Stage: spark.read.table(stage)
+    Engine->>Target: DeltaTable.merge(stage).whenNotMatchedInsertAll()
+    Engine->>Stage: DROP TABLE stage
+```
+
+## Engineering highlights
+
+- **Streaming vs Batch.** We chose Spark Structured Streaming because it provides a unified engine capable of handling both continuous streams and batch workloads with the same codebase, while offering built-in state management via automatic checkpoints and robust fault tolerance with automatic restarts upon failure. Traditional batch processing would force you to manually implement and manage processed file tracking, state management, and failure retries.
+- **Specs vs. engines.** `SourceFeed` / `SilverSpec` dataclasses describe *what* flows; the engines define *how*. Custom `build_df` builders cover the irregular cases (stream–stream joins, aggregations).
+- **One source of configuration truth.** A frozen `Config` dataclass declares each setting once (flag, env var, default); the CLI parser is generated from it. Resolution order: CLI > environment > `.env` > defaults.
 - **MERGE safety policies.** Every target declares its update semantics: insert-only (immutable facts), last-writer-wins (`user_profile`), SCD Type 1 (`user_bins`), monotonic advance (`gym_logs`). All MERGEs are idempotent by business key, which is what makes replays and backfills safe.
 - **Serverless-compatible streaming.** Silver/gold upserts use a stage + batch-MERGE pattern: `readStream` appends to an ephemeral `{name}_stage` Delta table via writeStream.toTable, and a batch `DeltaTable.merge()` promotes those rows into the target. This replaces `foreachBatch`, bypassing the `ISOLATION_STARTUP_FAILURE.SANDBOX_STARTUP` error on Databricks Serverless compute via Spark Connect. Public API, checkpoints, watermarks, dropDuplicates, and batch_transform semantics remain unchanged.
-- **Python compatibility issues.** Certain Spark Structured Streaming features require a Python worker (forEach, stateful trasnforms and UDFs among others). Serverless compute via Spark Connect lacks full compatibility with Python workers (e.g. Sandbox startup failure SQLSTATE: 39000). Restricted environments demand alternative designs. Pipelines bypass this limitation using a stage and batch pattern.
 - **Explicit phase orchestration.** Dependent targets run in declared phases (`PHASES`); a phase fully drains before the next starts.
-- **Two trigger modes.** Default `availableNow` (drain everything, exit — ideal on metered/free compute) or continuous `--stream --processing-time 30 seconds`.
+- **Two trigger modes.** Default `availableNow` (drain everything, exit — ideal on metered/free compute) or continuous `--stream --processing-time 30 seconds`. (Continuous mode is not supported on Serverless compute via Spark Connect as of now.)
+- Partitioning strategy was implemented for the high-volume `kafka_multiplex_bz` table by enriching incoming records with `date_lookup` data, enabling efficient weekly partitioning to optimize query performance and data scanning for large-scale ingestion
+
 
 # Prerequisites
 - A Databricks Free Edition account
-- Python 3.12 for compatibility with Databricks Connect
-- Databricks Connect (la version que usamos es anituguua. Esta impuesta por el runtime de databricks. Busca URL para documentar esto)
+- Databricks Connect 18.0 to 18.3 (as per [Databricks requirements](https://docs.databricks.com/aws/en/dev-tools/databricks-connect/requirements#versions))
 - Databricks CLI
-- Existing Databricks workspace and catalogue
+- Python 3.12 (required for compatibility with Databricks Connect)
+- An existing Databricks workspace and a Unity Catalogue catalogue with `USE CATALOG` and `CREATE SCHEMA` permissions.
 
 # Setup
 git clone <repo-url> && cd <repo>uv venv && source .venv/bin/activate      # or python -m venvuv pip install -e ".[dev]"                # editable install incl. databricks-connect
@@ -47,353 +107,138 @@ Or run it as a Databricks Job
 databricks bundle deploy   # uploads the wheel and the job definitiondatabricks bundle run wearpipe_pipeline
 The job chains the tasks in dependency order: deploy_ddl → bronze → silver → gold.
 
-# Configuration
-Every setting follows the same priority chain — CLI beats environment, environmentbeats .env, .env beats defaults:
+## Configuration
+Every setting follows the same priority chain — CLI beats environment, environment beats .env, .env beats defaults:
 
 Aquí tienes la información organizada en una tabla Markdown:
 
 | Flag | Env var | Default | Purpose |
 | --- | --- | --- | --- |
-| `--env` | `GYM_ENV` | `dev` | Unity Catalog (catalog name) to run against |
-| `--layer` | `GYM_LAYER` | `bronze` | `bronze` | `silver` | `gold` |
-| `--stream` | `GYM_STREAM` | `off` | continuous mode instead of `availableNow` |
-| `--processing-time` | `GYM_PROCESSING_TIME` | `5 seconds` | trigger interval in continuous mode |
-| `--starting-version` | `GYM_STARTING_VERSION` | `0` | Delta version to read from (only with an empty checkpoint — for backfills) |
+| `--catalogue` | `WEARPIPE_CATALOGUE` | `None` | Databricks catalogue name (Unity Catalogue). Required: project does not creates UC catalogues |
+| `--layer` | `WEARPIPE_LAYER` | bronze | Pipeline layer to run |
+| `--base-checkpoint-path` | `WEARPIPE_BASE_CHECKPOINT_PATH` | chkpnt | Root volume path to persist checkpoints |
+| `--volume` | `WEARPIPE_VOLUME` | wearpipe_vol | Databricks managed volume name |
+| `--base-data-path` | `WEARPIPE_BASE_DATA_PATH` | raw | Root data path to store data |
+| `--db-name` | `WEARPIPE_DB_NAME` | wearpipe_db | Databricks database name (schema) |
+| `--max-files-per-trigger` | N/A | 1000 | Maximum number of files to process per trigger in Spark Structured Streaming to limit input flow to avoid OOM errors |
+| `--stream` | N/A | False | Enable Spark Structured Streaming. Defaults to batch mode |
+| `--processing-time` | `WEARPIPE_PROCESSING_TIME` | 15 | Trigger interval in seconds for continuous streaming mode |
+| `--starting_version` | `WEARPIPE_STARTING_VERSION` | 0 | Delta version to start from; only honored when the stream checkpoint is empty. It enables deterministic cold-starts, backfills from version 0 using idempotent MERGE, partial bug replays from specific versions via DESCRIBE HISTORY, recovery after checkpoint corruption  |
+
+## Setup and usage
+1. Clone the repository and install dependencies:
+
+```bash
+
+git clone <repo-url> && cd <repo>
+uv venv && source .venv/bin/activate      # or python -m venv .venv && source .venv/bin/activate
+uv pip install -e ".[dev]"                # editable install incl. databricks-connect
+```
+2. Authenticate to Databricks:
+
+```bash
+
+databricks auth login --host https://<your-workspace>.databricks.com
+````
+3. Add `serverless_compute_id = auto` to your `~/.databrickscfg` file so the code remains valid for both prod and dev
 
 
-# Next steps
+4. Configure environment variables:
+Copy .env.example to .env and adjust (DATABRICKS_CONFIG_PROFILE, GYM_ENV, etc.).
+Keep .env out of version control — it is gitignored by default.
 
 
-Proyecto de aprendiza Databricks. Se basa en capstoone project del curso de Udemy Streaming Processin con Databricks.
+5. Run a pipeline:
 
-Este proyecto aplica las mejores practicas de ingenieria del softwar para el procesamiento de datos en streaming con Databricks..
+```bash
 
-El proyecto asume la existencia de un catalogo en Databricks, no crea un catalogo nuevo.
+# Run the Bronze layer
+uv run wearpipe --catalogue dev --layer bronze
 
-Best practices recommend use separate databases for bronze, silver and gold. For simplicity, this project uses a single databse for all medallion layers.
+# Run the Silver layer
+uv run wearpipe --catalogue dev --layer silver
 
-To avoid JVM dependency locally, we use Databricks Connect to use cloud resources to run the code from the dev environment. This requires to swap
-PySpark for databricks-connect in our dev dependencies
+# Run the Gold layer
+uv run wearpipe --catalogue dev --layer gold
 
-As per Databricks Connect version support matrix, for serverless compute we need:
-- Python 3.12
-- "databricks-connect>=18.0,<18.4"
+# Run all layers
+uv run wearpipe --catalogue dev --layer all
+```
 
-The project is tested on serverless only. Note that there are some API methods that are not available on serverles.
+6. Run the tests:
 
-SQL DDL for structure, DataFrame API for data. Reason: SQL for data transformations misses typing and testing capabilities.
+```bash
 
-Databricks permite la integración con una capa de almacenamiento externa (cloud storage) para guardar tanto el metastore del catálogo como los datos (tablas, vistas, archivos, etc). Por simplicidad, el proyecto usa default storage. En Databricks, Default storage is a fully managed object storage platform that provides ready-to-use storage.
+# Unit tests
+uv run pytest tests/unit/
 
-Serverless workspaces use default storage for internal and workspace storage, and for the default catalog that gets created with the workspace. In serverless workspaces, you can create additional catalogs in either default storage or in your own cloud object storage.
+# Integration tests (requires Databricks connection)
+uv run pytest tests/integration/test_end2end.py -s
+```
 
-In both classic workspaces and serverless workspaces, default storage is used by features to store things like control plane metadata, derived data, models, and other artifacts
-
-By default, catalogs that use default storage are only accessible from the workspace where they are created.
-
-El proyecto asume la existencia de un catalogo dedicado pre-existente en Databricks.
-
-El proyecto crea un volumen (VOLUME_NAME) para el almacenamiento de datos no tabulares, incluyendo la siguiente estructura:
-- data_zone (non-tabular data)
-- checkpoint_zone (checkpoint storage)
-
-Dual session:
-- local or CI/CD running on databricks-connect
-- prod runns on Databricks Runtime (DBR)
-
-All business logic implemented as pure functions over DataFrames (see example below)
-
-Sample entry point invoked by job in prod. The code does not know anything about the runtime (dev or prod).
-The environment is read from the command line (argument)
-
-
-ESTRUCTURA PROYECTO:
-
-learn-databricks/
-├── databricks.yml              # config del bundle (targets, variables, entrypoints)
-├── resources/
-│   └── jobs.py                 # definición de jobs con databricks-bundles
+## Project structure
+```text
+.
+├── pyproject.toml
+├── README.md
 ├── src/
 │   └── wearpipe/
 │       ├── __init__.py
-│       ├── config.py           # configuración por entorno (rutas e identificadores)
-│       ├── bronze_specs.py     # QUE ingestar (3 fuentes)
-│       ├── main.py             # punto de entrada (CLI): parsea args, construye sesión, elige capa
-│       ├── runtime.py          # fábrica de sesión dual (patrón clave)
-│       ├── bronze.py           # motor genérico de ingesta de datos crudos (el "como")
-│       ├── transforms.py       # transformaciones reusables: funciones puras sobre DataFrames (el "cómo")
-│       ├── streaming.py        # CÓMO hacer streaming+MERGE para gold y silver
-│       ├── upserters.py        # CÓMO hacer el MERGE (MergeSpec, merge_batch, dedupe_latest)
-│       ├── silver_specs.py     # QUE transformar (8 targets) + fases
-│       ├── transforms.py       # transformaciones reusables: funciones puras sobre DataFrames (df -> df)
-│       └── gold_specs.py       # QUE agregar (1 target)
-├── tests/
-│   ├── conftest.py
-│   ├── test_bronze.py
-│   ├── test_silver.py
-│   └── test_gold.py
-├── pyproject.toml
-└── .github/workflows/ci-cd.yml
-
-Pasos:
-1. Autenticacion interactiva (una sólo vez en dev): ejemplo `databricks auth login --host https://adb-123456789.azuredatabricks.net`. Esto crea un perfil en ~/.databrickscfg
-2. Añade `serverless_compute_id = auto` a el archivo ~/.databrickscfg para que el código sea válido tanto para prod como para dev
-3. Parametros de configuracion: config dataclass
-4. Crear tablas (DDL): setup helper class
-5. Cargar datos historicos y lookup (solo se carga una vez antes de pasar a produccion):
-    - Carga de datos estaticos de búsqueda en la tabla date_lookup de la capa silver (date dimension). En proyectos reales, se cargan atributos temporales para 20 años de acuerdo a los estandares de la industria para este tipo de tablas. Por simplicidad, usaremos una dimensión temporal reducida (año 2023).
-    - Por simplicidad, no usaremos datos históricos para el proyecto. Normalmente, la mayoría de proyectos del mundo real requerirán integrar los datos históricos, por lo que migrar los datos existentes y cargarlos es una tarea habitual (1. subir archivos a la nube, 2. load the data to DB)
-6. Ingestión de datos (bronze layer): existen dos tipos de pipelines que podemos usar para ingestar los datos de origen (raw data) en nuestra capa bronce:
-    - Batch
-    - Streaming <== RECOMENDADO
-
-Ventajas de procesamiento continuo (streaming):
-- Soporta procesamiento por lotes sin cambiar el código, simplemente se ejecuta a intervalos regulares
-- Gestión automática de checkpoints
-- Reinicio automatico en caso de fallo
-
-Se espera que la tabla kafka_multiplex_bz almacena datos masivos por lo que se recomiendo realizar particiones. En nuestro caso, enriquecemos la tabla con los datos de la tabla date_lookup para poder particionar la tabla kafka_multiplex_bz por semanas.
-
-En lugar de implementar una función por cada tabla de la capa Bronze, adoptamos un diseño dirigido por datos. Cada fuente de datos es un dato, no un método. Esto nos permite eliminar redundancia en el código y facilita la mantenibilidad. La forma de recolectar datos es muy similar en este capa.
-
-
-```yaml
-# FASE 4
-# databricks.yml
-bundle:
-  name: etl-ventas
-
-python:
-  loads:
-    - 'resources.jobs:load'      # entrypoint: ejecuta load() y fusiona el resultado
-
-variables:
-  catalog_prefix:
-    description: Prefijo del catálogo UC por entorno
-    default: dev
-
-targets:
-  dev:
-    default: true
-    workspace:
-      host: https://adb-123456789.azuredatabricks.net
-      artifact_path: /Volumes/main/_artifacts/etl_ventas/dev   # wheel en UC Volume
-
-  prod:
-    mode: production             # exige deploy con SP, aísla recursos, protege contra
-    workspace:                   # despliegues accidentales desde local
-      host: https://adb-123456789.azuredatabricks.net
-      artifact_path: /Volumes/main/_artifacts/etl_ventas/prod
-    variables:
-      catalog_prefix: prod
-    run_as:
-      service_principal_name: sp-etl-ventas-prod
-```
-
-```yaml
-# resources/jobs.py
-from databricks.bundles.jobs import (
-    ClusterSpec, CronSchedule, Job, JobCluster, PythonWheelTask, Task,
-)
-
-
-def load() -> list[Job]:
-    """Genera un job por tabla — el caso de uso donde Python brilla vs YAML."""
-    return [_job(t) for t in ("customers", "orders", "payments")]
-
-
-def _job(table: str) -> Job:
-    return Job(
-        name=f"etl_ventas_{table}",
-        schedule=CronSchedule(
-            quartz_cron_expression="0 0 5 * * ?",
-            timezone_id="Europe/Madrid",
-        ),
-        parameters={"catalog": "${vars.catalog_prefix}"},   # interpolación resuelta en deploy
-        tasks=[
-            Task(
-                task_key="ingest",
-                python_wheel_task=PythonWheelTask(
-                    package_name="etl_ventas",
-                    entry_point="main",
-                    parameters=["--catalog", "${vars.catalog_prefix}",
-                                "--table", table],
-                ),
-            ),
-        ],
-        job_clusters=[
-            JobCluster(
-                job_cluster_key="main",
-                new_cluster=ClusterSpec(
-                    spark_version="15.4.x-scala2.12",
-                    node_type_id="Standard_DS3_v2",
-                    num_workers=2,
-                    data_security_mode="SINGLE_USER",
-                ),
-            )
-        ],
-    )
-```
-
-FASE 5:
-```bash
-# Validar la config generada por Python antes de nada
-databricks bundle validate -t dev
-
-# Desplegar a dev y hacer smoke test manual
-databricks bundle deploy -t dev
-databricks bundle run etl_ventas_customers -t dev
-````
-FASE 6: CI/CD
-```yaml
-# .github/workflows/ci-cd.yml
-name: ci-cd
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-
-env:
-  DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
-
-jobs:
-  quality:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install -e ".[dev]"
-      - run: ruff check src tests
-      - run: mypy src
-      - run: pytest tests/unit
-      - run: databricks bundle validate -t dev
-        env:
-          DATABRICKS_CLIENT_ID: ${{ secrets.SP_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.SP_CLIENT_SECRET }}
-
-  deploy-dev:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: dev
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install -e ".[dev]"
-      - run: pytest tests/unit
-      - run: databricks bundle deploy -t dev
-        env:
-          DATABRICKS_CLIENT_ID: ${{ secrets.SP_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.SP_CLIENT_SECRET }}
-
-  deploy-prod:
-    needs: deploy-dev
-    runs-on: ubuntu-latest
-    environment: production     # ← exige aprobación manual en GitHub
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install -e ".[dev]"
-      - run: databricks bundle deploy -t prod
-        env:
-          DATABRICKS_CLIENT_ID: ${{ secrets.SP_PROD_CLIENT_ID }}
-          DATABRICKS_CLIENT_SECRET: ${{ secrets.SP_PROD_CLIENT_SECRET }}
-```
-
-Despliegue a produccion con aprobacion manual: `deploy-prod model=manual`
-
-OAuth M2M con service principals (nunca PATs de usuario). prod sólo tiene los permisos necesarios (run_as)
-
-En prod, el origen de la coonfiguracion son las variables y parametros del bundle. En dev el origen de la config es la sehell o .env
-
-El wheel desplegado en prod se construye a partir del commit de main no de un artefacto subido a mano
-
-# Validar la config generada por Python antes de nada
-databricks bundle validate -t dev
-
-# Desplegar a dev y hacer smoke test manual
-databricks bundle deploy -t dev
-databricks bundle run etl_ventas_customers -t dev
-
-MEJORA: sustituir print por logging
-
-SPARK CONFIG:
-
-* **`spark.conf.set("spark.sql.shuffle.partitions", sc.defaultParallelism)`**
-Ajusta el número de particiones tras un *shuffle* (como en *joins* o agregaciones) para que coincida con el nivel de paralelismo por defecto del clúster (`sc.defaultParallelism`). Evita usar el valor por defecto de Spark (200), que suele ser ineficiente para datasets pequeños o medianos.
-* **`spark.conf.set("spark.databricks.delta.optimizeWrite.enabled", True)`**
-Activa la escritura optimizada en tablas Delta. Agrupa y reorganiza las particiones de forma dinámica antes de escribir en disco para evitar generar miles de archivos pequeños (*small files problem*).
-* **`spark.databricks.delta.autoCompact.enabled`**
-Habilita la compactación automática en Delta Lake. Tras una escritura, comprueba si hay archivos pequeños y los fusiona en archivos más grandes de manera automática, reduciendo la necesidad de ejecutar comandos `OPTIMIZE` manuales.
-* **`spark.sql.streaming.stateStore.providerClass`**
-Configura **RocksDB** como el proveedor del almacén de estado para *Spark Structured Streaming*. Es ideal para flujos con mucho estado (como *joins* o agregaciones en streaming), ya que gestiona los datos fuera de la memoria JVM principal, evitando errores de falta de memoria (*OOM*).
+│       ├── main.py           # CLI entry point and argparse configuration
+│       ├── config.py         # Config dataclass and load_settings()
+│       ├── history_loader.py # Load history and lookup data
+│       ├── io.py             # build_object_path() helper for UC volume paths
+│       ├── specs.py          # Spec dataclasses: MergeSpec, SilverSpec, GoldSpec
+│       ├── ddl.py            # ddl_for_spec() helper for generating DDL from StructType
+│       ├── transforms.py     # Column transformations (e.g., add_audit_columns)
+│       ├── bronze.py         # BronzeIngester engine + SourceFeed dataclass + FEEDS list
+│       ├── silver.py         # SilverMerger engine
+│       ├── silver_specs.py   # SILVER_STREAMS dict
+│       ├── gold.py           # GoldBuilder engine
+│       ├── gold_specs.py     # GOLD_STREAMS dict + build_df functions
+│       └── setup.py          # SetupHelper: creates DB, volume, and tables from specs
+└── tests/
+    ├── conftest.py           # Fixtures: spark, config
+    ├── _helpers.py
+    ├── unit/
+    │   ├── test_ddl.py
+    │   ├── test_config.py
+    │   ├── test_transforms.py
+    │   ├── test_gold_schema_check.py
+    │   └── test_silver_schema_check.py
+    └── integration/
+        ├── test_history_loader.py
+        ├── test_end2end.py   # Batch e2e test
+        └── test_setup.py     # SetupHelper validation tests
 
 
 
-------------------------------------------------------------------------------------------------------------------
-TODO (19/10)
-- Yaml de produccion (ver abajo ejemplo)
-- README con diagrama de capas bronze/silver/gold + cómo ejecutar el test end2end. Sin esto, nadie va a entender tu proyecto en 30 segundos.
-- CI básico (GitHub Actions: ruff + mypy + pytest). Opcional para un repo de aprendizaje, pero demuestra madurez.
+## Engineering trade-offs & limitations
 
-```yaml
-tasks:
-  - task_key: deploy_ddl
-    python_wheel_task: {package_name: gym-pipeline, entry_point: deploy,
-                        parameters: ["--env", "${bundle.target}"]}
-  - task_key: bronze
-    depends_on: [{task_key: deploy_ddl}]
-    python_wheel_task: {package_name: gym-pipeline, entry_point: gym-pipeline,
-                        parameters: ["--layer", "bronze", "--env", "${bundle.target}"]}
-  - task_key: silver
-    depends_on: [{task_key: bronze}]
-    python_wheel_task: {package_name: gym-pipeline, entry_point: gym-pipeline,
-                        parameters: ["--layer", "silver", "--env", "${bundle.target}"]}
-  - task_key: gold
-    depends_on: [{task_key: silver}]
-    python_wheel_task: {package_name: gym-pipeline, entry_point: gym-pipeline,
-                        parameters: ["--layer", "gold", "--env", "${bundle.target}"]}
-```
+1. Serverless Compute Constraints
+Databricks Serverless compute (used by default in Free Edition) restricts certain Spark Structured Streaming features.
 
---------------------------------------------------------------------------------------------------------------
+- Continuous streaming triggers are disabled. The ProcessingTime trigger (continuous micro-batching) is not supported on Serverless compute via Spark Connect. The pipeline defaults to availableNow=True, which processes all pending data in a single finite micro-batch and exits. This is ideal for metered/free compute but precludes true continuous streaming tests.
+- `foreachBatch` is unavailable. Serverless compute via Spark Connect lacks full compatibility with Python workers (e.g., ISOLATION_STARTUP_FAILURE.SANDBOX_STARTUP SQLSTATE: 39000). To bypass this, the pipeline uses the Stage + Batch-MERGE pattern: writeStream.toTable writes to an ephemeral _stage table, and a subsequent batch DeltaTable.merge() promotes rows to the final target.
 
-## Qué es startingVersion
-En el contexto de Databrikcs, startingVersion es el punto de arranque del stream cuando el checkpoint está vacio.
+2. Python and Databricks Connect Compatibility
+The versions of Python and Databricks Connect are constrained by the Databricks Runtime (DBR) version of the Serverless compute. You cannot arbitrarily upgrade these dependencies.
 
-Una tabla Delta lleva un log de commits versionado (v0 = creación, v1, v2... cada append/update es una versión). Cuando haces readStream.table(), Spark debe decidir en qué punto del log arranca.
+Python 3.12: Required because the installed Databricks Connect SDK depends on features available in this version.
+Databricks Connect v18.3.x: Pinned to match the DBR of the Serverless compute. See the official Databricks Connect compatibility matrix for details.
 
-En el proyecto, starting_point controla desde qué versión del log e la tabla Delta empieza a leer el stream la primera vez que arranca (checkpoint vacio).
+3. Schema Definition and Parser Quirks
+When creating Delta tables via DDL or CTAS (CREATE TABLE AS SELECT), the Databricks SQL parser can silently drop or rename reserved keywords (e.g., time, update_type, sex) if they are not backtick-quoted.
 
-Casos de uso más comunes:
+Solution: The project uses a centralized ddl_for_spec() helper that reads the target_schema from each spec and generates backtick-quoted DDL. This is the single source of truth for physical table schemas.
 
-- Backfill. Si corriges un bug en una transformación silver y quieres regenerar las tablas: borras los checkpoints (y truncas los targets si quieres), relanzas con starting_version=0, y el stream relee todo el bronze. Los MERGE son idempotentes por clave, así que el reproceso converge al estado correcto sin duplicados — es la razón por la que los upserters del original están diseñados con MERGE y no con append ciego.
+## Next steps
 
-- Reproceso parcial tras un bug. En lugar de releer todo, consultas el punto del error (`DESCRIBE HISTORY dev.wearpipe_db.registered_users_bz`)
-localizando la versión previa al commit problemático, borras el checkpoint del stream afectado y relanzas con --starting-version N: solo se reprocesa desde ahí.
+Potential improvements for future iterations:
 
-- Recuperación operativa. Si un checkpoint se corrompe o se pierde, starting_version define de dónde re-sembrar el stream en vez de depender de las semánticas por defecto del snapshot.
+- Structured Logging: Replace print() statements with Python's logging module for configurable log levels and structured output.
+- CI/CD Pipeline: Implement GitHub Actions to run ruff, mypy, and pytest on every push and pull request.
+- Databricks Asset Bundles: Package the pipeline as an Asset Bundle for production deployment, replacing the manual Python CLI invocation.
 
-- Cold-start explícito. Sin la opción, el comportamiento de primera arranque (snapshot completo) es implícito y poco conocido. Fijar 0 lo hace determinista y documentado.
 
-**IMPORTANTE:** Sólo aplica con checkpoint vacío. Una vez que el stream tiene checkpoint, Spark ignora completamente staritngVersion. El stream siempre arranca desde su checkpoint, con independencia del valor starting_point que le pases al motor.
 
-## Change Data Capture (CDC)
-Nuestra capa Silver, en lugar de procesar sólo snapshot completos, se basa en la tabla Delta, que soporta CDC en streaming, para procesar todos los cambios (inserciones, actualizaciones y borrados) en origen (capa Bronze). Los streamings de Silver son CDC, y los streamings de Gold son CDC+MERGE.
-
-A continuación se explican las opciones existentes del reader:
-
-- startingVersion: qué versión del log leer cuando el checkpoint está vacío (backfill completo con 0, ventana con N).
-
-- ignoreDeletes: tolera que se borren ficheros de la tabla fuente (p. ej. DELETE por partición) sin que el stream falle. Sin ella, cualquier delete en el origen mata el stream con una excepción, porque Structured Streaming asume fuentes append-only.
-
-- ignoreChanges: tolera que la fuente sufra UPDATE/MERGE/OVERWRITE que reescriben ficheros. Matiz importante: no propaga el cambio correctamente — el stream re-emite las filas afectadas como si fueran nuevas. Por eso solo es seguro cuando el sink sabe deduplicar/actualizar: es exactamente el caso de user_bins (lee user_profile, que es SCD Type 1 y recibe MERGE ... UPDATE), donde el sink re-machea por user_id y actualiza.
-
-- withEventTimeOrder: fuerza el procesamiento en orden de event-time cuando hay dedupe/watermark y la fuente recibe updates desordenados. Tu proyecto la dejó desactivada.
-
-- skipChangeCommits (DBR moderno, alternativa): salta directamente los commits que contienen cambios/borrados, sin re-emitir nada. Semántica distinta de ignoreChanges (tolerar vs. descartar); útil si el sink no quiere ver filas re-escritas.
-
-El proyecto también aplica CDC para ingerir los eventos de Kafka en la capa Bronze. En este caso, se procesan todos los eventos, sin importar si son nuevos o actualizados, basado en èvent_type` (new / insert / update).
