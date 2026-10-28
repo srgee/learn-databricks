@@ -84,28 +84,12 @@ sequenceDiagram
 - Partitioning strategy was implemented for the high-volume `kafka_multiplex_bz` table by enriching incoming records with `date_lookup` data, enabling efficient weekly partitioning to optimize query performance and data scanning for large-scale ingestion
 
 
-# Prerequisites
+## Prerequisites
 - A Databricks Free Edition account
 - Databricks Connect 18.0 to 18.3 (as per [Databricks requirements](https://docs.databricks.com/aws/en/dev-tools/databricks-connect/requirements#versions))
 - Databricks CLI
 - Python 3.12 (required for compatibility with Databricks Connect)
 - An existing Databricks workspace and a Unity Catalogue catalogue with `USE CATALOG` and `CREATE SCHEMA` permissions.
-
-# Setup
-git clone <repo-url> && cd <repo>uv venv && source .venv/bin/activate      # or python -m venvuv pip install -e ".[dev]"                # editable install incl. databricks-connect
-Authenticate once — Databricks Connect picks it up:
-
-databricks auth login --host https://<your-workspace>.databricks.com
-Copy .env.example to .env and adjust (DATABRICKS_CONFIG_PROFILE, GYM_ENV, ...).Keep .env out of version control — it is gitignored by default.
-
-
-# Load data & deploy schema
-wearpipe load-history          # uploads raw fixtures + builds date_lookup (idempotent)wearpipe deploy                # applies sql/ DDL: schema, tables, volumes
-Run the pipeline
-wearpipe --layer bronze        # Auto Loader: raw files → bronze (availableNow)wearpipe --layer silver        # CDC streams + MERGE: bronze → silverwearpipe --layer gold          # aggregation: silver → gold
-Or run it as a Databricks Job
-databricks bundle deploy   # uploads the wheel and the job definitiondatabricks bundle run wearpipe_pipeline
-The job chains the tasks in dependency order: deploy_ddl → bronze → silver → gold.
 
 ## Configuration
 Every setting follows the same priority chain — CLI beats environment, environment beats .env, .env beats defaults:
@@ -210,7 +194,7 @@ uv run pytest tests/integration/test_end2end.py -s
         ├── test_history_loader.py
         ├── test_end2end.py   # Batch e2e test
         └── test_setup.py     # SetupHelper validation tests
-
+```
 
 
 ## Engineering trade-offs & limitations
