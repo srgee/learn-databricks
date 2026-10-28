@@ -1,5 +1,6 @@
 import pytest
 from databricks.connect import DatabricksSession
+
 from wearpipe.config import Config, load_settings
 
 
