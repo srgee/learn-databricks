@@ -9,7 +9,7 @@ No paid Databricks account is required. Every design decision in this repo (path
 
 ## What will you learn?
 
-- Streaming structured data processing
+- Apache Spark Structured Streaming on Databricks
 - Real architecture, toy-sized data. The full medallion pattern (Auto Loader,CDC streaming, MERGE upserts, streaming aggregations) on a dataset small enough to reprocess in seconds.
 - Production-shaped repository. Packaging (Python wheel), Asset Bundles,configuration with a documented priority chain, and tests. The engineering practices that tutorials usually skip.
 - Every layer is observable. With Unity Catalog you can watch raw files become bronze tables, then curated silver entities, then gold aggregates. All fromCatalog Explorer.
