@@ -17,56 +17,44 @@ compatibility) but do NOT share a base class: each layer owns its spec
 and engine, with only the fields and merge semantics that layer needs.
 """
 
-from collections.abc import Callable
-from dataclasses import dataclass
-
 from delta.tables import DeltaTable
 from pyspark.sql import SparkSession
-from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.streaming.query import StreamingQuery
+from pyspark.sql.types import StructType
 
-from sbit.specs import MergeSpec  # import temporal hasta mover MergeSpec a un módulo común
-
-
-# ============================================================
-# Spec
-# ============================================================
-@dataclass(frozen=True)
-class GoldSpec:
-    """Specification for a Gold target.
-
-    Gold targets are immutable aggregates built from Silver sources.
-    The spec is intentionally minimal: 4 fields, no optional transforms
-    or watermarks. If a Gold target needs source-side transformation,
-    that logic belongs inside ``build_df``.
-
-    Attributes:
-        name: Target table short name.
-        source: Source table short name (a Silver table). Kept for
-            documentation and traceability; ``build_df`` is responsible
-            for actually reading it.
-        build_df: ``((spark, starting_version)) -> DataFrame`` builder
-            that constructs the streaming DataFrame from scratch.
-            Typically involves stream-stream joins or aggregations.
-        merge: MERGE semantics. Gold MERGEs are insert-only by design;
-            the ``update`` flag of ``MergeSpec`` is honored if set, but
-            the engine's merge logic does not include the update branch
-            (it falls back to insert-only behavior).
-    """
-
-    name: str
-    source: str
-    build_df: Callable[[SparkSession, int], DataFrame]
-    merge: MergeSpec
+from sbit.specs import GoldSpec  # import temporal hasta mover MergeSpec a un módulo común
 
 
-# ============================================================
-# Engine
-# ============================================================
+def _verify_schema_match(
+    spec_name: str,
+    expected_schema: StructType,
+    actual_schema: StructType,
+) -> None:
+    """Verify that an actual DataFrame schema matches the expected spec schema."""
+    expected = {f.name: f.dataType.simpleString() for f in expected_schema.fields}
+    actual = {f.name: f.dataType.simpleString() for f in actual_schema.fields}
+
+    missing = set(expected) - set(actual)
+    extra = set(actual) - set(expected)
+    type_mismatches = {
+        name: f'{expected[name]} -> {actual[name]}'
+        for name in (set(expected) & set(actual))
+        if expected[name] != actual[name]
+    }
+
+    if missing or extra or type_mismatches:
+        parts = [f'[{spec_name}] stage schema does not match target_schema:']
+        if missing:
+            parts.append(f'  missing in stage: {sorted(missing)}')
+        if extra:
+            parts.append(f'  extra in stage: {sorted(extra)}')
+        if type_mismatches:
+            parts.append(f'  type mismatches: {type_mismatches}')
+        raise RuntimeError('\n'.join(parts))
+
+
 class GoldBuilder:
     """Stage + batch-MERGE pipeline for the Gold layer.
-
-    See module docstring for the architecture overview.
 
     Args:
         spark: Active SparkSession.
@@ -86,17 +74,12 @@ class GoldBuilder:
         self.checkpoint_root = checkpoint_root
         self.starting_version = starting_version
 
-    # ---------- Nombres ----------
-
     @staticmethod
     def _stage_name(name: str) -> str:
         return f'{name}_stage'
 
     def _checkpoint_path(self, s: GoldSpec) -> str:
-        # 'gold_' hardcoded: this engine only handles gold.
         return f'{self.checkpoint_root}/gold_{s.name}'
-
-    # ---------- Fase 1: stream → stage ----------
 
     def start(self, s: GoldSpec, once: bool = True, processing_time: str = '15 seconds') -> StreamingQuery:
         """Start the stream that writes the build_df output to the stage table."""
@@ -120,7 +103,6 @@ class GoldBuilder:
 
         return writer.toTable(stage_table)
 
-    # ---------- Fase 2: batch MERGE stage → target ----------
     def _merge_stage_to_target(self, s: GoldSpec) -> None:
         """Insert-only MERGE stage → target (native DeltaTable API).
 
@@ -130,13 +112,15 @@ class GoldBuilder:
         needing an update branch.
         """
         stage_df = self.spark.read.table(self._stage_name(s.name))
+
+        # Sanity check: catches schema drifts before merge
+        _verify_schema_match(s.name, s.target_schema, stage_df.schema)
+
         target = DeltaTable.forName(self.spark, s.name)
         target.alias('t').merge(stage_df.alias('s'), s.merge.join_on).whenNotMatchedInsertAll().execute()
 
     def _drop_stage(self, s: GoldSpec) -> None:
         self.spark.sql(f'DROP TABLE IF EXISTS {self._stage_name(s.name)}')
-
-    # ---------- Orquestación ----------
 
     def run(
         self,
@@ -145,6 +129,7 @@ class GoldBuilder:
         once: bool = True,
         processing_time: str = '15 seconds',
     ) -> None:
+        """Orchestration."""
         for phase in phases:
             queries = [self.start(specs[name], once, processing_time) for name in phase]
             if once:

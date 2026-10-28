@@ -1,3 +1,18 @@
+"""Setup helpers.
+
+Bronze tables are created from DDL strings. Their schemas are dictated by
+the raw landing format (CSV/JSON DDL strings in bronze_specs), not by a transform contract.
+
+Silver/Gold tables are created from the specs in their respective modules' target_schema.
+
+Each target_schema is converted to backtick-quoted DDL via ddl_for_spec(). This is the single
+source of truth for silver/gold schemas: changing a spec's target_schema automatically updates the
+physical table definition on the next setup_db() call.
+
+SQL views are created separately because its definition involves a multi-table join that
+does not fit the spec pattern.
+"""
+
 import sys
 import time
 from pathlib import Path
@@ -8,6 +23,7 @@ from databricks.sdk import WorkspaceClient
 
 from sbit.config import load_settings
 from sbit.ddl import ddl_for_spec
+from sbit.gold_specs import GOLD_STREAMS
 from sbit.history_loader import load_history
 from sbit.io import build_object_path
 from sbit.silver_specs import SILVER_STREAMS
@@ -19,22 +35,6 @@ class SetupHelper:
         self.catalogue: str = catalogue_name
         self.db_name: str = db_name
         self.initialized: bool = False
-        self.tables: list[str] = [
-            'registered_users_bz',
-            'gym_logins_bz',
-            'kafka_multiplex_bz',
-            'users',
-            'gym_logs',
-            'user_profile',
-            'heart_rate',
-            'user_bins',
-            'workout_bpm',
-            'workouts',
-            'completed_workouts',
-            'date_lookup',
-            'gym_summary',
-            'workout_bpm_summary',
-        ]
         self.volume_name = volume_name
         self.volume_exists: bool = False
         self.data_root = data_root
@@ -103,17 +103,6 @@ class SetupHelper:
         print('Done!')
 
     def create_silver_tables(self) -> None:
-        """Create all silver target tables by deriving DDLs from SilverSpec.target_schema.
-
-        Each spec's target_schema is converted to backtick-quoted DDL via
-        ddl_for_spec(). This is the single source of truth for silver
-        schemas: changing a spec's target_schema automatically updates the
-        physical table definition on the next setup_db() call.
-
-        Bronze tables are NOT included here — their schemas are dictated
-        by the raw landing format (CSV/JSON DDL strings in bronze_specs),
-        not by a transform contract.
-        """
         if not self.initialized:
             raise KeyError('Missing configuration settings')
         print('Creating silver tables from specs... ', end='')
@@ -122,138 +111,13 @@ class SetupHelper:
             self.spark.sql(ddl)
         print('Done!')
 
-    def create_users_table(self) -> None:
+    def create_gold_tables(self) -> None:
         if not self.initialized:
             raise KeyError('Missing configuration settings')
-        print('Creating users table... ', end='')
-        self.spark.sql(
-            f"""
-            CREATE OR REPLACE TABLE {self.catalogue}.{self.db_name}.users(
-                user_id BIGINT,
-                device_id BIGINT,
-                mac_address STRING,
-                registration_timestamp TIMESTAMP
-            )"""
-        )
-        print('Done!')
-
-    def create_gym_logs_table(self) -> None:
-        if not self.initialized:
-            raise KeyError('Missing configuration settings')
-        print('Creating gym_logs table ... ', end='')
-        self.spark.sql(
-            f"""
-            CREATE OR REPLACE TABLE {self.catalogue}.{self.db_name}.gym_logs(
-                mac_address STRING,
-                gym BIGINT,
-                login TIMESTAMP,
-                logout TIMESTAMP
-            )"""
-        )
-        print('Done!')
-
-    def create_user_profile_table(self) -> None:
-        if not self.initialized:
-            raise KeyError('Missing configuration settings')
-        print('Creating user_profile table ... ', end='')
-        self.spark.sql(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.catalogue}.{self.db_name}.user_profile(
-                user_id BIGINT,
-                update_type STRING,
-                dob DATE,
-                sex STRING,
-                gender STRING,
-                first_name STRING,
-                last_name STRING,
-                street_address STRING,
-                city STRING,
-                state STRING,
-                zip INT,
-                updated TIMESTAMP
-            )"""
-        )
-        print('Done!')
-
-    def create_heart_rate_table(self) -> None:
-        if not self.initialized:
-            raise KeyError('Missing configuration settings')
-        print('Creating heart_rate table ... ', end='')
-        self.spark.sql(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.catalogue}.{self.db_name}.heart_rate(
-                device_id LONG,
-                time TIMESTAMP,
-                heartrate DOUBLE,
-                valid BOOLEAN
-            )"""
-        )
-        print('Done!')
-
-    def create_user_bins_table(self) -> None:
-        if not self.initialized:
-            raise KeyError('Missing configuration settings')
-        print('Creating user_bins table ... ', end='')
-        self.spark.sql(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.catalogue}.{self.db_name}.user_bins(
-                user_id BIGINT,
-                age STRING,
-                gender STRING,
-                city STRING,
-                state STRING
-            )"""
-        )
-        print('Done!')
-
-    def create_workouts_table(self) -> None:
-        if not self.initialized:
-            raise KeyError('Missing configuration settings')
-        print('Creating workouts table ... ', end='')
-        self.spark.sql(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.catalogue}.{self.db_name}.workouts(
-                user_id INT,
-                workout_id INT,
-                time TIMESTAMP,
-                action STRING,
-                session_id INT
-            )"""
-        )
-        print('Done!')
-
-    def create_completed_workouts_table(self) -> None:
-        if not self.initialized:
-            raise KeyError('Missing configuration settings')
-        print('Creating completed_workouts table ... ', end='')
-        self.spark.sql(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.catalogue}.{self.db_name}.completed_workouts(
-                user_id INT,
-                workout_id INT,
-                session_id INT,
-                start_time TIMESTAMP,
-                end_time TIMESTAMP
-            )"""
-        )
-        print('Done!')
-
-    def create_workout_bpm_table(self) -> None:
-        if not self.initialized:
-            raise KeyError('Missing configuration settings')
-        print('Creating workout_bpm table ... ', end='')
-        self.spark.sql(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.catalogue}.{self.db_name}.workout_bpm(
-                user_id INT,
-                workout_id INT,
-                session_id INT,
-                start_time TIMESTAMP,
-                end_time TIMESTAMP,
-                time TIMESTAMP,
-                heartrate DOUBLE
-            )"""
-        )
+        print('Creating gold tables from specs... ', end='')
+        for spec in GOLD_STREAMS.values():
+            ddl = ddl_for_spec(spec, self.catalogue, self.db_name)
+            self.spark.sql(ddl)
         print('Done!')
 
     def create_date_lookup_table(self) -> None:
@@ -297,10 +161,10 @@ class SetupHelper:
         )
         print('Done!')
 
-    def create_gym_summary_table(self) -> None:
+    def create_gym_summary_view(self) -> None:
         if not self.initialized:
             raise KeyError('Missing configuration settings')
-        print('Creating gym_summary table ... ', end='')
+        print('Creating gym_summary view ... ', end='')
         self.spark.sql(
             f"""
             CREATE OR REPLACE VIEW {self.catalogue}.{self.db_name}.gym_summary AS
@@ -327,17 +191,11 @@ class SetupHelper:
         self.create_users_bronze_table()
         self.create_gym_logins_bronze_table()
         self.create_kafka_multiplex_bronze_table()
-        self.create_users_table()
-        self.create_gym_logs_table()
-        self.create_user_profile_table()
-        self.create_heart_rate_table()
-        self.create_workouts_table()
-        self.create_completed_workouts_table()
-        self.create_workout_bpm_table()
-        self.create_user_bins_table()
+        self.create_silver_tables()
+        self.create_gold_tables()
         self.create_date_lookup_table()
         self.create_workout_bpm_summary_table()
-        self.create_gym_summary_table()
+        self.create_gym_summary_view()
 
         print(f'DB setup completed in {int(time.time()) - start_time} seconds.')
 
