@@ -24,8 +24,7 @@ from delta.tables import DeltaTable
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.streaming.query import StreamingQuery
 from pyspark.sql.types import StructType
-
-from sbit.specs import SilverSpec
+from wearpipe.specs import SilverSpec
 
 
 def _verify_schema_match(

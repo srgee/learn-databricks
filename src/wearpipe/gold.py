@@ -21,8 +21,7 @@ from delta.tables import DeltaTable
 from pyspark.sql import SparkSession
 from pyspark.sql.streaming.query import StreamingQuery
 from pyspark.sql.types import StructType
-
-from sbit.specs import GoldSpec  # import temporal hasta mover MergeSpec a un módulo común
+from wearpipe.specs import GoldSpec  # import temporal hasta mover MergeSpec a un módulo común
 
 
 def _verify_schema_match(

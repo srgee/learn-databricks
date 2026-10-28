@@ -2,14 +2,13 @@ import sys
 import time
 
 from databricks.connect.session import DatabricksSession
-
-from sbit.bronze import FEEDS, BronzeIngester
-from sbit.config import load_settings
-from sbit.gold import GoldBuilder
-from sbit.gold_specs import GOLD_PHASES, GOLD_STREAMS
-from sbit.io import build_object_path
-from sbit.silver import SilverMerger
-from sbit.silver_specs import SILVER_PHASES, SILVER_STREAMS
+from wearpipe.bronze import FEEDS, BronzeIngester
+from wearpipe.config import load_settings
+from wearpipe.gold import GoldBuilder
+from wearpipe.gold_specs import GOLD_PHASES, GOLD_STREAMS
+from wearpipe.io import build_object_path
+from wearpipe.silver import SilverMerger
+from wearpipe.silver_specs import SILVER_PHASES, SILVER_STREAMS
 
 
 def main():

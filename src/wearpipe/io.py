@@ -3,7 +3,7 @@ Capa de acceso a los datos: sabe cómo se leen y escriben los datos. Los pipelin
 Organizado por categorías, en orden de aparición en el proyecto:
 # 1. Constructores de nombres/paths — puros, sin I/O, trivialmente testeables
 def build_volume_path(catalog: str, schema: str, volume: str, *parts: str) -> str
-def table_fqn(catalog: str, schema: str, table: str) -> str          # → "dev.sbit_db.customers"
+def table_fqn(catalog: str, schema: str, table: str) -> str          # → "dev.wearpipe_db.customers"
 
 # 2. Lecturas — envuelven spark.read con convenciones centralizadas
 def read_json(spark, path: str) -> DataFrame

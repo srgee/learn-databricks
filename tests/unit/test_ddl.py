@@ -1,4 +1,4 @@
-"""Unit tests for sbit.ddl.ddl_for_spec.
+"""Unit tests for wearpipe.ddl.ddl_for_spec.
 
 These tests are pure (no SparkSession required) and run in milliseconds.
 They verify that the generated DDL preserves reserved column names
@@ -19,9 +19,8 @@ from pyspark.sql.types import (
     StructType,
     TimestampType,
 )
-
-from sbit.ddl import ddl_for_spec
-from sbit.specs import MergeSpec, SilverSpec
+from wearpipe.ddl import ddl_for_spec
+from wearpipe.specs import MergeSpec, SilverSpec
 
 # ============================================================
 # Test schemas

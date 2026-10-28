@@ -7,8 +7,7 @@ from pyspark.sql.types import (
     StructField,
     StructType,
 )
-
-from sbit.gold import _verify_schema_match
+from wearpipe.gold import _verify_schema_match
 
 # ============================================================
 # Test fixture: workout_bpm_summary schema

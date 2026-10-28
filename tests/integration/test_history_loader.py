@@ -1,7 +1,6 @@
 from pyspark.sql import SparkSession
-
-from sbit.config import Config
-from sbit.history_loader import _transform_date_lookup, load_history
+from wearpipe.config import Config
+from wearpipe.history_loader import _transform_date_lookup, load_history
 
 
 def test_transform_date_lookup(spark: SparkSession):

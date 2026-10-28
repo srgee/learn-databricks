@@ -20,13 +20,12 @@ from typing import Any
 
 from databricks.connect.session import DatabricksSession
 from databricks.sdk import WorkspaceClient
-
-from sbit.config import load_settings
-from sbit.ddl import ddl_for_spec
-from sbit.gold_specs import GOLD_STREAMS
-from sbit.history_loader import load_history
-from sbit.io import build_object_path
-from sbit.silver_specs import SILVER_STREAMS
+from wearpipe.config import load_settings
+from wearpipe.ddl import ddl_for_spec
+from wearpipe.gold_specs import GOLD_STREAMS
+from wearpipe.history_loader import load_history
+from wearpipe.io import build_object_path
+from wearpipe.silver_specs import SILVER_STREAMS
 
 
 class SetupHelper:

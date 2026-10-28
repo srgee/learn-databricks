@@ -1,4 +1,4 @@
-"""Unit tests for sbit.silver._verify_schema_match.
+"""Unit tests for wearpipe.silver._verify_schema_match.
 
 These tests are pure (no SparkSession required) and validate that the
 schema check correctly detects:
@@ -23,8 +23,7 @@ from pyspark.sql.types import (
     StructType,
     TimestampType,
 )
-
-from sbit.silver import _verify_schema_match
+from wearpipe.silver import _verify_schema_match
 
 # ============================================================
 # Test fixtures: realistic schemas matching the actual silver specs

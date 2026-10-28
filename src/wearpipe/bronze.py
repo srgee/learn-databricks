@@ -3,8 +3,7 @@ from dataclasses import dataclass, field
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.streaming.query import StreamingQuery
-
-from sbit.transforms import add_audit_columns, join_date_lookup
+from wearpipe.transforms import add_audit_columns, join_date_lookup
 
 
 @dataclass(frozen=True)
@@ -44,7 +43,7 @@ FEEDS = [
 class BronzeIngester:
     """Streaming engine that lands raw files into Bronze Delta tables.
 
-    Reads each source feed declared in ``sbit.bronze.FEEDS`` via Auto
+    Reads each source feed declared in ``wearpipe.bronze.FEEDS`` via Auto
     Loader (``cloudFiles``), applies the per-feed schema and transform
     (typically ``add_audit_columns`` to attach ingestion metadata), and
     writes the result to a Bronze Delta table named after the feed. Each

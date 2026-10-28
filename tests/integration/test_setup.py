@@ -1,8 +1,7 @@
 import pytest
 from pyspark.sql import SparkSession
-
-from sbit.config import Config
-from sbit.setup import SetupHelper
+from wearpipe.config import Config
+from wearpipe.setup import SetupHelper
 
 
 @pytest.fixture(scope='session')

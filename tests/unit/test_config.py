@@ -1,6 +1,6 @@
 import pytest
 
-from sbit.config import Config, load_settings
+from wearpipe.config import Config, load_settings
 
 
 def test_config_defaults():
@@ -25,6 +25,6 @@ def test_load_settings_from_cli():
 def test_load_settings_from_env(monkeypatch):
     monkeypatch.setenv('WEARPIPE_CATALOGUE', 'staging')
     monkeypatch.setenv('WEARPIPE_LAYER', 'gold')
-    config = load_settings([])
+    config = load_settings([], env_file=None)
     assert config.catalogue_name == 'staging'
     assert config.layer == 'gold'

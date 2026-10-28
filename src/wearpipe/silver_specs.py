@@ -11,10 +11,9 @@ from pyspark.sql.types import (
     StructType,
     TimestampType,
 )
-
-from sbit.specs import MergeSpec, SilverSpec
-from sbit.transforms import calculate_age_bins, parse_kafka_topic
-from sbit.upserters import dedup_latest
+from wearpipe.specs import MergeSpec, SilverSpec
+from wearpipe.transforms import calculate_age_bins, parse_kafka_topic
+from wearpipe.upserters import dedup_latest
 
 
 def _get_cdc_options(starting_version: int, ignore_changes: bool = False) -> dict:

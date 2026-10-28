@@ -15,18 +15,21 @@ No paid Databricks account is required. Every design decision in this repo (path
 - Documented failure modes. The compatibility playbookbelow records real errors hit while building this, so you learn why the rulesexist, not just the rules.
 
 # Engineering highlights
-- Specs vs. engines. SourceFeed / StreamSpec / MergeSpec dataclasses describe what flows; the two engines define how. Custom build_df builderscover the irregular cases (stream–stream joins, aggregations).
-- One source of configuration truth. A frozen Settings dataclass declares eachsetting once (flag, env var, default); the CLI parser is generated from it.Resolution order: CLI > environment > .env > defaults.
-- MERGE safety policies. Every target declares its update semantics:insert-only (immutable facts), last-writer-wins (user_profile),SCD Type 1 (user_bins), monotonic advance (gym_logs). All MERGEs areidempotent by business key, which is what makes replays and backfills safe.
-- Explicit phase orchestration. Dependent targets run in declared phases(PHASES); a phase fully drains before the next starts.
-- Two trigger modes. Default availableNow (drain everything, exit — ideal onmetered/free compute) or continuous --stream --processing-time 30 seconds.
+
+- **Specs vs. engines.** `SourceFeed` / `StreamSpec` dataclasses describe *what* flows; the two engines define *how*. Custom `build_df` builders cover the irregular cases (stream–stream joins, aggregations).
+- **One source of configuration truth.** A frozen `Settings` dataclass declares each setting once (flag, env var, default); the CLI parser is generated from it. Resolution order: CLI > environment > `.env` > defaults.
+- **MERGE safety policies.** Every target declares its update semantics: insert-only (immutable facts), last-writer-wins (`user_profile`), SCD Type 1 (`user_bins`), monotonic advance (`gym_logs`). All MERGEs are idempotent by business key, which is what makes replays and backfills safe.
+- **Serverless-compatible streaming.** Silver/gold upserts use a stage + batch-MERGE pattern: `readStream` appends to an ephemeral `{name}_stage` Delta table via writeStream.toTable, and a batch `DeltaTable.merge()` promotes those rows into the target. This replaces `foreachBatch`, bypassing the `ISOLATION_STARTUP_FAILURE.SANDBOX_STARTUP` error on Databricks Serverless compute via Spark Connect. Public API, checkpoints, watermarks, dropDuplicates, and batch_transform semantics remain unchanged.
+- **Python compatibility issues.** Certain Spark Structured Streaming features require a Python worker (forEach, stateful trasnforms and UDFs among others). Serverless compute via Spark Connect lacks full compatibility with Python workers (e.g. Sandbox startup failure SQLSTATE: 39000). Restricted environments demand alternative designs. Pipelines bypass this limitation using a stage and batch pattern.
+- **Explicit phase orchestration.** Dependent targets run in declared phases (`PHASES`); a phase fully drains before the next starts.
+- **Two trigger modes.** Default `availableNow` (drain everything, exit — ideal on metered/free compute) or continuous `--stream --processing-time 30 seconds`.
 
 # Prerequisites
 - A Databricks Free Edition account
 - Python
 - Databricks Connect (la version que usamos es anituguua. Esta impuesta por el runtime de databricks. Busca URL para documentar esto)
 - Databricks CLI
-- Existing Databricks workspace, catalogue and volume
+- Existing Databricks workspace and catalogue
 - History and lookup data in Databricks volume (date-lookup.json available in the repo)
 
 # Setup
@@ -38,11 +41,11 @@ Copy .env.example to .env and adjust (DATABRICKS_CONFIG_PROFILE, GYM_ENV, ...).K
 
 
 # Load data & deploy schema
-sbit load-history          # uploads raw fixtures + builds date_lookup (idempotent)sbit deploy                # applies sql/ DDL: schema, tables, volumes
+wearpipe load-history          # uploads raw fixtures + builds date_lookup (idempotent)wearpipe deploy                # applies sql/ DDL: schema, tables, volumes
 Run the pipeline
-sbit --layer bronze        # Auto Loader: raw files → bronze (availableNow)sbit --layer silver        # CDC streams + MERGE: bronze → silversbit --layer gold          # aggregation: silver → gold
+wearpipe --layer bronze        # Auto Loader: raw files → bronze (availableNow)wearpipe --layer silver        # CDC streams + MERGE: bronze → silverwearpipe --layer gold          # aggregation: silver → gold
 Or run it as a Databricks Job
-databricks bundle deploy   # uploads the wheel and the job definitiondatabricks bundle run sbit_pipeline
+databricks bundle deploy   # uploads the wheel and the job definitiondatabricks bundle run wearpipe_pipeline
 The job chains the tasks in dependency order: deploy_ddl → bronze → silver → gold.
 
 # Configuration
@@ -112,7 +115,7 @@ learn-databricks/
 ├── resources/
 │   └── jobs.py                 # definición de jobs con databricks-bundles
 ├── src/
-│   └── sbit/
+│   └── wearpipe/
 │       ├── __init__.py
 │       ├── config.py           # configuración por entorno (rutas e identificadores)
 │       ├── bronze_specs.py     # QUE ingestar (3 fuentes)
@@ -133,55 +136,6 @@ learn-databricks/
 ├── pyproject.toml
 └── .github/workflows/ci-cd.yml
 
-Las SPECS son un registro declarativo de fuentes (el "qué"). Indican qué tablas existen, de donde vienen, qué esquema y qué opciones. Son básicamente datos, no tienen lógica. Existe una spec por capa.
-
-Usamos dos motores por que los patrones son distintos:
-- Bronze: lee archivos, escribe directamente sin MERGE (append)
-- Silver/Gold: lee tablas Delta con opciones CDC, escriben via foreachBatch + DeltaTable.merge
-
-Las transformaciones son funciones puras que no leen estado global, no deciden rutas, ni tocan la sesion. Por eso son testables sin necesityar infraestructura y son 100% reutilizables entre las capas.
-
-El DDL no pertenece ni a los specs (declaran qué datos fluyen) ni a los motores (ejecutan cómo). Es infraestructura: se versiona en su propio sitio y se ejecuta como task previo en el bundle, antes de bronze. Hay además una razón técnica que lo hace obligatorio en tu proyecto:
-
-Bronze se auto-crea: toTable() crea la tabla si no existe con el schema del stream. En nuestro proyecto mantenemoos el DDL en la capa de bronze tambien. De esta forma cualquier tarea puede ejecutarse en cualquier orden.
-
-Usamos una carpeta sql para almacenar los scripts de DDL. DDL idempotente por capa, un deploy.py que lo aplica en orden, y un task deploy_ddl como primer eslabón del job, con un test de esquema que vigile el drift. Tenemos el problema de que el esquema de cada tabla vive en 2 sitios distintos (el string del spec y el fichero SQL). Si cambias uno y no el otro, el MERGE fallará en runtime con un error poco descriptivo. Dos defensas:
-
-1. Test de esquema que verifique las columnas de cada tabla destino contra lo esperado
-2. A medio plazo generar los .sql desde las specs mediante un script. Los specs pasarían a ser la única fuente de verdad
-
-Cuándo necesitarías algo más
-- Evolución de esquema con equipo: cuando empieces a hacer ALTER TABLE ADD COLUMN sobre tablas en producción, el DDL idempotente no basta; ahí entran migraciones versionadas (Flyway/Liquibase vía JDBC, o simplemente ficheros sql/YYYYMMDD_descripcion.sql que aplican deltas). Overkill para Free Edition hoy.
-- dbt: si silver/gold migraran a proceso batch, dbt-databricks generaría el DDL por ti. Con streaming y foreachBatch(MERGE) no encaja directamente; no lo cambies ahora.
-
-```toml
-# sample pyproject.toml: databricks-connect only exists on dev, Databricks Runtime already provides pyspark and base deps
-[project]
-name = "etl_ventas"
-version = "1.0.0"
-requires-python = ">=3.11"
-dependencies = []                # el DBR ya provee pyspark y librerías base
-
-[project.entry-points."etl_ventas"]
-main = "etl_ventas.jobs:main"    # entry point para el python_wheel_task
-
-[project.optional-dependencies]
-dev = [
-    "databricks-connect==15.4.*",   # ⚠️ pinned a la versión del DBR; SOLO dev
-    "databricks-bundles>=1.20,<2",
-    "pytest>=8",
-    "chispa",                       # asserts sobre DataFrames
-    "ruff",
-    "mypy",
-]
-
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-```
 Pasos:
 1. Autenticacion interactiva (una sólo vez en dev): ejemplo `databricks auth login --host https://adb-123456789.azuredatabricks.net`. Esto crea un perfil en ~/.databrickscfg
 2. Añade `serverless_compute_id = auto` a el archivo ~/.databrickscfg para que el código sea válido tanto para prod como para dev
@@ -366,11 +320,6 @@ databricks bundle validate -t dev
 databricks bundle deploy -t dev
 databricks bundle run etl_ventas_customers -t dev
 
-
-MEJORA:
-14/10: para proyecto de aprendizaje mantenemos el aprovisionamiento de recursos via SQL DDL. Se deja como mejora la integración con herramientas IaC
-como Terraform o Pulumi. Sin embargo, queda pendiente la refactorizacion para implementar el layout profesional. En este caso, debemos sacar toda la logica DDL de la aplicacion para que se invoque coo un paso mas del CI antes del bundle deploy. Para ello debemos mover todo el codigo DDL a un modulo bootstrap.py en la carpeta raiz. También creamos un nuevo modulo preconditions.py dentro de "lib" para las validaciones (valida los recursos de infra necesarios para el proyecto).
-
 MEJORA: sustituir print por logging
 
 SPARK CONFIG:
@@ -389,13 +338,14 @@ Configura **RocksDB** como el proveedor del almacén de estado para *Spark Struc
 ------------------------------------------------------------------------------------------------------------------
 TODO (19/10)
 - Yaml de produccion (ver abajo ejemplo)
-- Añadir tests (ver ejemplo abajo)
-- REFACTOR: Renombrar paquete (sbit --> wearpipe)
+- REFACTOR: Renombrar paquete (wearpipe --> wearpipe)
 - REFACTOR: Mover build_path function para eliminar io.py module (solo 1 funcion)
-- REFACTOR: añade comilla invertidad en la formacion dinamica de SQL
 - REFACTOR: eliminar io.py
-- TEST: Schema drift: every deployed table must match the columns declared in thespecs/DDL — a renamed audit column fails here in one line, not as aSTREAM_FAILED in production
 - CONFIG: flag to switch stream/batch modes (pocessing_times para microbatches??)
+- Single source of truth para schemas
+- Reemplazar print()
+- README con diagrama de capas bronze/silver/gold + cómo ejecutar el test end2end. Sin esto, nadie va a entender tu proyecto en 30 segundos.
+- CI básico (GitHub Actions: ruff + mypy + pytest). Opcional para un repo de aprendizaje, pero demuestra madurez.
 
 ```yaml
 tasks:
@@ -429,7 +379,7 @@ Casos de uso más comunes:
 
 - Backfill. Si corriges un bug en una transformación silver y quieres regenerar las tablas: borras los checkpoints (y truncas los targets si quieres), relanzas con starting_version=0, y el stream relee todo el bronze. Los MERGE son idempotentes por clave, así que el reproceso converge al estado correcto sin duplicados — es la razón por la que los upserters del original están diseñados con MERGE y no con append ciego.
 
-- Reproceso parcial tras un bug. En lugar de releer todo, consultas el punto del error (`DESCRIBE HISTORY dev.sbit_db.registered_users_bz`)
+- Reproceso parcial tras un bug. En lugar de releer todo, consultas el punto del error (`DESCRIBE HISTORY dev.wearpipe_db.registered_users_bz`)
 localizando la versión previa al commit problemático, borras el checkpoint del stream afectado y relanzas con --starting-version N: solo se reprocesa desde ahí.
 
 - Recuperación operativa. Si un checkpoint se corrompe o se pierde, starting_version define de dónde re-sembrar el stream en vez de depender de las semánticas por defecto del snapshot.
@@ -454,73 +404,3 @@ A continuación se explican las opciones existentes del reader:
 - skipChangeCommits (DBR moderno, alternativa): salta directamente los commits que contienen cambios/borrados, sin re-emitir nada. Semántica distinta de ignoreChanges (tolerar vs. descartar); útil si el sink no quiere ver filas re-escritas.
 
 El proyecto también aplica CDC para ingerir los eventos de Kafka en la capa Bronze. En este caso, se procesan todos los eventos, sin importar si son nuevos o actualizados, basado en èvent_type` (new / insert / update).
-
-## Data engines
-
-The pipeline is built on a simple architecture: declarative specs (describe what moves through the pipeline), and two generic engines (define how data is moved).Adding a new table means adding a spec entry. No code changes are required in the engines:
-
-- Bronze pipeline: BronzeIngester class (engine) / Input (raw data files) / Output (Delta tables)
-- Gold and Silver pipelines: UpserterPipeline class (engine) / Input (Delta tables) / Output (Delta tables)
-
-### BronzeIngester
-
-The bronze engine lands raw files from the landing zone into Delta tables using Auto Loader (cloudFiles), which incrementally discovers newfiles and guarantees exactly-once ingestion via checkpointing.
-
-Each source is declared as a SourceFeed spec in bronze_specs.py:
-
-- target name, file format and explicit schema
-- reader options (e.g. header, maxFilesPerTrigger to throttleprocessing on limited compute)
-- a pure transform (e.g. adding audit columns) applied to the stream
-- a scheduler pool tag
-
-The engine builds one streaming query per feed:
-
-landing_zone/<name>  →  readStream(cloudFiles)  →  transform  →  writeStream  →  toTable (<name>, append)
-
-Key properties:
-
-- Append-only: bronze never updates or deletes; the target table is the immutable landing of raw data.
-- Schema-first: the schema is declared in the spec, not inferred,so ingestion never fails on a drifted file.
-- Idempotent replay: checkpoint state makes availableNow runsrepeatable — re-running drains only new files.
-
-
-### UpserterPipeline
-
-The silver and gold layers share a single engine that reads Delta tables as change streams and applies each micro-batch with a MERGE (via `DeltaTable.merge` inside 'foreachBatch`), making targets idempotent by business key.
-
-Each target is declared as a StreamSpec in silver_specs.py / gold_specs.py. For the standard single-source path the engine handles:
-
-- CDC reader options: `startingVersion` and `ignoreDeletes` / `ignoreChanges` (tolerating deletes on bronze or SCD1 updates on silver sources without killing the stream)
-- Event-time processing: watermark before `dropDuplicates`, so deduplication state is cleaned up automatically
-- Per-batch logic: `batch_transform` runs inside `foreachBatchfor` operations not allowed on streaming DataFrames (e.g. CDCrank() windowing to keep the latest event per key)
-- The MERGE itself is declarative (MergeSpec): a join condition plusoptional guarded UPDATE and INSERT clauses. The upsert logic in oneplace, applied identically to every target.
-
-Targets that escape the single-source pattern (stream-stream joins such as `completed_workouts`, multi-source joins with static dimensions such as `workout_bpm`, streaming aggregations such as `workout_bpm_summary`) use a custom builder function (`build_df`) that constructs the streaming DataFrame and hands it back to the engine.
-
-Dependent targets are executed in explicit phases (PHASES / GOLD_PHASES) with the `run` method. All streams  in a phase run concurrently and complete before the next pahse starts, so a target never consumes a table that has not been fully ingested yet.
-
-### MERGE safety
-
-All silver and gold writes go through DeltaTable.MERGE applied to the current micro-batch. Safety does not come from a single mechanism but from independent layers, each covering a distinct failure mode.
-
-- Idempotency by business key. Every MERGE matches on the target's natural key (user_id, device_id + time, etc). Replayed batches, backfills re-run with `--sarting-version` and cleared checkpoint, and rows re-emitted by source rewrites all converge to the same state: the MERGE updates the matched row or skips it (never duplicates it). This makes processing cheap and safe.
-- Update policy per target. Update semantics are a modeling decision, declared in each spec's MergeSpec (insert-only, last-writer-wins, slowly-changing-dimension overwrite, monotonic advance)
-- Deduplication. Stream level (`dropDuplicates`) applied after the event-time watermark bounds the dedup state and cleans it up automatically (checkpoint-owned).
-Batch level (rank per key, keep latest) runs inside `foreachBatch`, where window functions are allowed on micro-batches. Events arriving later than the watermark are dropped by design. The accepted trade-off for bounded streaming state.
-- Bounded merge scope. The MERGE source is always the current micro-batch, never a full table. Merge cost scales with batch size, not with target size.
-
-## Pipeline preconditions
-
-- Targets pre-exist: DDL is deployed before any stream starts(deploy_ddl task); DeltaTable.forName fails fast otherwise.
-- Phase ordering: a dependent target starts only after its inputs arefully drained (PHASES, awaited per phase).
-- Append-only bronze: silver MERGEs assume bronze never updates.ignoreDeletes / ignoreChanges tolerate source rewrites, and anyrows re-emitted by them are reconciled by the idempotent MERGE.
-
-
-## Running
-
-Both engines support two trigger modes, selected by --stream:
-
-- Default (availableNow): drains all pending data and exits —batch-style, cost-efficient, idempotent. Use for backfills andscheduled jobs.
-- --stream (continuous): triggers every --processing-timeinterval and runs indefinitely. Use for low-latency serving.
-
-

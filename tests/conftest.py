@@ -1,7 +1,6 @@
 import pytest
 from databricks.connect import DatabricksSession
-
-from sbit.config import Config, load_settings
+from wearpipe.config import Config, load_settings
 
 
 @pytest.fixture(scope='session')

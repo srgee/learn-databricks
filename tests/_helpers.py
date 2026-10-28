@@ -3,8 +3,7 @@ from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
 from pyspark.sql import SparkSession
-
-from sbit.config import Config
+from wearpipe.config import Config
 
 
 @dataclass(frozen=True)

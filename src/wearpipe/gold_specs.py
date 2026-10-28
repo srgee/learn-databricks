@@ -1,8 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType, IntegerType, LongType, StringType, StructField, StructType
-
-from sbit.specs import GoldSpec, MergeSpec
+from wearpipe.specs import GoldSpec, MergeSpec
 
 
 def build_workout_bpm_summary(spark: SparkSession, starting_version: int):

@@ -3,8 +3,7 @@ from unittest.mock import MagicMock
 
 import pyspark.sql.functions as F
 from pyspark.sql.types import LongType, StringType, StructField, StructType
-
-from sbit.transforms import (
+from wearpipe.transforms import (
     add_audit_columns,
     calculate_age_bins,
     join_date_lookup,

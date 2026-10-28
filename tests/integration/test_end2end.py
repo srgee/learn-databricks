@@ -2,16 +2,15 @@ from pathlib import Path
 
 from _helpers import DataProducer
 from pyspark.sql import SparkSession
-
-from sbit.bronze import FEEDS, BronzeIngester
-from sbit.config import Config
-from sbit.gold import GoldBuilder
-from sbit.gold_specs import GOLD_PHASES, GOLD_STREAMS
-from sbit.history_loader import load_history
-from sbit.io import build_object_path
-from sbit.setup import SetupHelper
-from sbit.silver import SilverMerger
-from sbit.silver_specs import SILVER_PHASES, SILVER_STREAMS
+from wearpipe.bronze import FEEDS, BronzeIngester
+from wearpipe.config import Config
+from wearpipe.gold import GoldBuilder
+from wearpipe.gold_specs import GOLD_PHASES, GOLD_STREAMS
+from wearpipe.history_loader import load_history
+from wearpipe.io import build_object_path
+from wearpipe.setup import SetupHelper
+from wearpipe.silver import SilverMerger
+from wearpipe.silver_specs import SILVER_PHASES, SILVER_STREAMS
 
 
 def test_batch(spark: SparkSession, config: Config):
