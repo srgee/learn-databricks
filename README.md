@@ -26,11 +26,10 @@ No paid Databricks account is required. Every design decision in this repo (path
 
 # Prerequisites
 - A Databricks Free Edition account
-- Python
+- Python 3.12 for compatibility with Databricks Connect
 - Databricks Connect (la version que usamos es anituguua. Esta impuesta por el runtime de databricks. Busca URL para documentar esto)
 - Databricks CLI
 - Existing Databricks workspace and catalogue
-- History and lookup data in Databricks volume (date-lookup.json available in the repo)
 
 # Setup
 git clone <repo-url> && cd <repo>uv venv && source .venv/bin/activate      # or python -m venvuv pip install -e ".[dev]"                # editable install incl. databricks-connect
@@ -338,12 +337,6 @@ Configura **RocksDB** como el proveedor del almacén de estado para *Spark Struc
 ------------------------------------------------------------------------------------------------------------------
 TODO (19/10)
 - Yaml de produccion (ver abajo ejemplo)
-- REFACTOR: Renombrar paquete (wearpipe --> wearpipe)
-- REFACTOR: Mover build_path function para eliminar io.py module (solo 1 funcion)
-- REFACTOR: eliminar io.py
-- CONFIG: flag to switch stream/batch modes (pocessing_times para microbatches??)
-- Single source of truth para schemas
-- Reemplazar print()
 - README con diagrama de capas bronze/silver/gold + cómo ejecutar el test end2end. Sin esto, nadie va a entender tu proyecto en 30 segundos.
 - CI básico (GitHub Actions: ruff + mypy + pytest). Opcional para un repo de aprendizaje, pero demuestra madurez.
 

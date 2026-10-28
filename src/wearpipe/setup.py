@@ -230,8 +230,13 @@ class SetupHelper:
         print('Done!')
 
     def upload_date_lookup_file(self) -> str:
-        remote_path = (
-            f'/Volumes/{self.catalogue}/{self.db_name}/{self.volume_name}/{self.data_root}/tests/date-lookup.json'  # noqa: E501
+        remote_path = build_object_path(
+            self.catalogue,
+            self.db_name,
+            self.volume_name,
+            self.data_root,
+            'tests',
+            'date-lookup.json',
         )
         local_path = Path(__file__).parent.parent.parent / 'data' / 'date-lookup.json'
 
