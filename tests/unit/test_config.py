@@ -2,17 +2,36 @@ import pytest
 
 from wearpipe.config import Config, load_settings
 
+VALID_LAYERS = ('bronze', 'silver', 'gold', 'all')
+INVALID_LAYER = 'invalid_layer'
 
-def test_config_defaults():
-    config = Config()
+
+def test_config_without_catalogue_name_raises_type_error() -> None:
+    with pytest.raises(TypeError):
+        Config()
+
+
+def test_config_with_catalogue_name_succeeds():
+    config = Config(catalogue_name='dev')
     assert config.catalogue_name == 'dev'
+
+
+@pytest.mark.parametrize('layer', VALID_LAYERS)
+def test_load_settings_accepts_valid_layer(layer):
+    """Each documented layer must be accepted without error."""
+    config = load_settings(['--layer', layer])
+    assert config.layer == layer
+
+
+def test_load_settiings_rejects_layer_not_in_allowed_set():
+    with pytest.raises(ValueError, match='layer'):
+        load_settings(['--layer', INVALID_LAYER])
+
+
+def test_load_settings_defaults():
+    config = load_settings([])
     assert config.layer == 'bronze'
     assert config.stream_flag is False
-
-
-def test_config_validation_error():
-    with pytest.raises(ValueError):
-        Config(layer='invalid_layer')
 
 
 def test_load_settings_from_cli():

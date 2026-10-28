@@ -10,27 +10,26 @@ class Config:
     """Single source of truth for config settings."""
 
     catalogue_name: str = field(
-        default='dev',
         metadata={
             'flag': '--catalogue',
             'env_var': 'WEARPIPE_CATALOGUE',
-            'help': 'Databricks catalogue name (Unity Catalogue)',
+            'help': 'Databricks catalogue name (Unity Catalogue). Required: project does not creates UC catalogues.',
         },
     )
     db_name: str = field(
-        default='db',
+        default='wearpipe_db',
         metadata={
             'flag': '--db-name',
             'env_var': 'WEARPIPE_DB_NAME',
-            'help': 'Databricks database name (schema)',
+            'help': 'Databricks database name (schema).',
         },
     )
     volume_name: str = field(
-        default='vol_name',
+        default='wearpipe_vol',
         metadata={
             'flag': '--volume',
             'env_var': 'WEARPIPE_VOLUME',
-            'help': 'Databricks managed volume name',
+            'help': 'Databricks managed volume name.',
         },
     )
     base_data_path: str = field(
@@ -38,7 +37,7 @@ class Config:
         metadata={
             'flag': '--base-data-path',
             'env_var': 'WEARPIPE_BASE_DATA_PATH',
-            'help': 'Root data directory in Databricks managed volume',
+            'help': 'Root data directory in Databricks managed volume.',
         },
     )
     base_checkpoint_path: str = field(
@@ -46,14 +45,14 @@ class Config:
         metadata={
             'flag': '--base-checkpoint-path',
             'env_var': 'WEARPIPE_BASE_CHECKPOINT_PATH',
-            'help': 'Root checkpoint directory in Databricks managed volume',
+            'help': 'Root checkpoint directory in Databricks managed volume.',
         },
     )
     max_files_per_trigger: int = field(
         default=1000,
         metadata={
             'flag': '--max-files-per-trigger',
-            'help': 'Maximum number of files to process per trigger in Spark Structured Streaming to limit input flow to avoid OOM errors',  # noqa: E501
+            'help': 'Maximum number of files to process per trigger in Spark Structured Streaming to limit input flow to avoid OOM errors.',  # noqa: E501
         },
     )
     stream_flag: bool = field(
@@ -62,7 +61,7 @@ class Config:
             'flag': '--stream',
             'is_flag': True,
             'action': 'store_true',
-            'help': 'Enable Spark Structured Streaming',
+            'help': 'Enable Spark Structured Streaming. Defaults to batch mode.',
         },
     )
     layer: str = field(
@@ -79,7 +78,7 @@ class Config:
         metadata={
             'flag': '--processing-time',
             'env_var': 'WEARPIPE_PROCESSING_TIME',
-            'help': 'Trigger interval for continuous streaming mode',
+            'help': 'Trigger interval for continuous streaming mode (default: 15 seconds).',
         },
     )
     starting_version: int = field(
@@ -87,7 +86,7 @@ class Config:
         metadata={
             'flag': '--starting-version',
             'env_var': 'WEARPIPE_STARTING_VERSION',
-            'help': 'Delta version to start from; only honored when the stream checkpoint is empty',
+            'help': 'Delta version to start from; only honored when the stream checkpoint is empty (default: 0).',
         },
     )
 
@@ -171,8 +170,18 @@ def load_settings(argv: list[str] | None = None, env_file: str | Path | None = '
     """
     if env_file is not None and Path(env_file).is_file():
         _load_env_file(Path(env_file))
+    try:
+        ns = build_parser().parse_args(argv)  # sys.argv[1:] if argv is None else argv
+    except SystemExit as e:
+        # argparse calls sys.exit(2) on validation errors (invalid choice,
+        # missing required arg, etc.). Convert to ValueError.
+        if e.code == 0:
+            # Legitimate exit, not a validation error. Re-raise unchanged.
+            raise
+        # argparse has already printed the error message to stderr; we just
+        # signal the failure to the caller as ValueError.
+        raise ValueError(f'Invalid CLI arguments: {argv!r}. Use --help to see available options.') from e
 
-    ns = build_parser().parse_args(argv)  # sys.argv[1:] if argv is None else argv
     types = get_type_hints(Config)
     kwargs = {}
 
